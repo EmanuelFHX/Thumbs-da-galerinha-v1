@@ -151,7 +151,8 @@
   margin-bottom: 12px;
 }
 
-.history-bar > div {
+.history-actions,
+.zoom-controls {
   display: flex;
   gap: 9px;
 }
@@ -169,7 +170,25 @@
   opacity: 0.72;
 }
 
-.history-bar > span {
+.zoom-controls {
+  align-items: center;
+  gap: 5px;
+}
+
+.zoom-controls button {
+  min-width: 34px;
+}
+
+.zoom-controls button:nth-child(2) {
+  min-width: 62px;
+}
+
+.zoom-controls button.is-fit {
+  color: var(--ink);
+  background: var(--yellow);
+}
+
+.canvas-dimensions {
   color: var(--ink-soft);
   font-family: ui-monospace, Consolas, monospace;
   font-size: 0.72rem;
@@ -178,11 +197,27 @@
 
 .canvas-frame {
   width: 100%;
+  height: min(62vh, 620px);
+  min-height: 390px;
   overflow: auto;
   border: 4px solid var(--ink);
   border-radius: 5px;
   background: #bdb7ad;
   box-shadow: 9px 9px 0 var(--ink);
+}
+
+.stage-scaler {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 18px auto;
+}
+
+.stage-transform {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 960px;
+  height: 540px;
+  transform-origin: top left;
 }
 
 .canvas-frame canvas {
@@ -191,6 +226,17 @@
 
 .canvas-frame.is-drawing canvas {
   cursor: crosshair;
+}
+
+.canvas-frame.is-pan-ready,
+.canvas-frame.is-pan-ready canvas {
+  cursor: grab !important;
+}
+
+.canvas-frame.is-panning,
+.canvas-frame.is-panning canvas {
+  cursor: grabbing !important;
+  user-select: none;
 }
 
 .editor-status {
@@ -326,6 +372,64 @@
   padding: 14px 12px;
   border: 2px dashed rgba(37, 35, 43, 0.56);
   border-radius: 6px;
+}
+
+.transform-controls,
+.crop-controls {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 12px;
+  border: 2px dashed rgba(37, 35, 43, 0.56);
+  border-radius: 6px;
+}
+
+.transform-controls legend,
+.crop-controls legend {
+  padding-inline: 6px;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.alignment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.alignment-grid button,
+.flip-buttons button,
+.crop-controls button {
+  min-height: 34px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.72rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.alignment-grid button:hover,
+.flip-buttons button:hover,
+.crop-controls button:hover {
+  background: var(--yellow);
+}
+
+.flip-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.crop-controls {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.crop-controls legend {
+  grid-column: 1 / -1;
 }
 
 .image-adjustments legend {

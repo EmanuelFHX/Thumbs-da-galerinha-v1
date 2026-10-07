@@ -16,6 +16,8 @@ const CANVAS_WIDTH = 960
 const CANVAS_HEIGHT = 540
 const DEFAULT_COLOR = '#ff5c7a'
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024
+const MIN_ZOOM = 0.25
+const MAX_ZOOM = 2
 const STICKERS = [
   { name: 'Estrela', source: '/stickers/star.svg' },
   { name: 'Balão', source: '/stickers/speech.svg' },
@@ -36,6 +38,35 @@ function getInitialSidePanel() {
 
 function createId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`
+}
+
+function clamp(value, minimum, maximum) {
+  return Math.min(Math.max(value, minimum), maximum)
+}
+
+function getSnappedPosition(node) {
+  const threshold = 10
+  const bounds = node.getClientRect({ skipShadow: true })
+  const nextPosition = { x: node.x(), y: node.y() }
+  const horizontalCenter = bounds.x + bounds.width / 2
+  const verticalCenter = bounds.y + bounds.height / 2
+
+  if (Math.abs(bounds.x) <= threshold) nextPosition.x -= bounds.x
+  if (Math.abs(bounds.x + bounds.width - CANVAS_WIDTH) <= threshold) {
+    nextPosition.x += CANVAS_WIDTH - bounds.x - bounds.width
+  }
+  if (Math.abs(horizontalCenter - CANVAS_WIDTH / 2) <= threshold) {
+    nextPosition.x += CANVAS_WIDTH / 2 - horizontalCenter
+  }
+  if (Math.abs(bounds.y) <= threshold) nextPosition.y -= bounds.y
+  if (Math.abs(bounds.y + bounds.height - CANVAS_HEIGHT) <= threshold) {
+    nextPosition.y += CANVAS_HEIGHT - bounds.y - bounds.height
+  }
+  if (Math.abs(verticalCenter - CANVAS_HEIGHT / 2) <= threshold) {
+    nextPosition.y += CANVAS_HEIGHT / 2 - verticalCenter
+  }
+
+  return nextPosition
 }
 
 function useCanvasImage(source) {
@@ -86,6 +117,7 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
 
   const sharedProps = {
     ref: nodeRef,
+    id: element.id,
     x: element.x,
     y: element.y,
     rotation: element.rotation ?? 0,
@@ -97,10 +129,12 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
     onClick: onSelect,
     onTap: onSelect,
     onDragEnd: (event) => {
+      const snappedPosition = getSnappedPosition(event.target)
+      event.target.position(snappedPosition)
       onChange({
         ...element,
-        x: event.target.x(),
-        y: event.target.y(),
+        x: snappedPosition.x,
+        y: snappedPosition.y,
       })
     },
     onTransformEnd: () => {
@@ -139,6 +173,10 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
         {...sharedProps}
         width={element.width}
         height={element.height}
+        cropX={element.cropX ?? 0}
+        cropY={element.cropY ?? 0}
+        cropWidth={element.cropWidth ?? element.sourceWidth}
+        cropHeight={element.cropHeight ?? element.sourceHeight}
         fill={element.fill}
         stroke="#25232b"
         strokeWidth={5}
@@ -241,9 +279,13 @@ function getLayerLabel(element, index) {
 
 function EditorScreen({ onBack }) {
   const stageRef = useRef(null)
+  const canvasFrameRef = useRef(null)
   const fileInputRef = useRef(null)
   const isDrawing = useRef(false)
   const drawingStart = useRef([])
+  const isSpacePressed = useRef(false)
+  const panStart = useRef(null)
+  const shortcutActions = useRef(null)
   const baseImage = useCanvasImage('/sample-base.svg')
 
   const [tool, setTool] = useState(getInitialTool)
@@ -255,6 +297,10 @@ function EditorScreen({ onBack }) {
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
   const [status, setStatus] = useState('Escolha uma ferramenta e comece a criar.')
+  const [zoom, setZoom] = useState(1)
+  const [fitMode, setFitMode] = useState(true)
+  const [spaceDown, setSpaceDown] = useState(false)
+  const [isPanning, setIsPanning] = useState(false)
 
   const selectedElement = elements.find((element) => element.id === selectedId)
 
@@ -309,7 +355,7 @@ function EditorScreen({ onBack }) {
     setSidePanel('properties')
   }
 
-  function addImage(source, width, height, message) {
+  function addImage(source, width, height, message, options = {}) {
     const maxWidth = 360
     const maxHeight = 260
     const scale = Math.min(maxWidth / width, maxHeight / height, 1)
@@ -318,7 +364,14 @@ function EditorScreen({ onBack }) {
     const nextElement = {
       id: createId('image'),
       type: 'image',
+      kind: options.kind ?? 'photo',
       source,
+      sourceWidth: width,
+      sourceHeight: height,
+      cropX: 0,
+      cropY: 0,
+      cropWidth: width,
+      cropHeight: height,
       x: Math.round((CANVAS_WIDTH - nextWidth) / 2),
       y: Math.round((CANVAS_HEIGHT - nextHeight) / 2),
       width: nextWidth,
@@ -337,7 +390,13 @@ function EditorScreen({ onBack }) {
   }
 
   function addSticker(sticker) {
-    addImage(sticker.source, 180, 180, `${sticker.name} adicionado ao canvas.`)
+    addImage(
+      sticker.source,
+      180,
+      180,
+      `${sticker.name} adicionado ao canvas.`,
+      { kind: 'sticker' },
+    )
   }
 
   function handleImageUpload(event) {
@@ -438,6 +497,246 @@ function EditorScreen({ onBack }) {
     })
   }
 
+  function setZoomLevel(nextZoom) {
+    const frame = canvasFrameRef.current
+    const previousZoom = zoom
+    const normalizedZoom = clamp(nextZoom, MIN_ZOOM, MAX_ZOOM)
+
+    setFitMode(false)
+    setZoom(normalizedZoom)
+
+    if (!frame) return
+    const centerX = frame.scrollLeft + frame.clientWidth / 2
+    const centerY = frame.scrollTop + frame.clientHeight / 2
+    const ratio = normalizedZoom / previousZoom
+
+    requestAnimationFrame(() => {
+      frame.scrollLeft = centerX * ratio - frame.clientWidth / 2
+      frame.scrollTop = centerY * ratio - frame.clientHeight / 2
+    })
+  }
+
+  function fitCanvas() {
+    const frame = canvasFrameRef.current
+    if (!frame) return
+
+    const nextZoom = clamp(
+      Math.min(
+        (frame.clientWidth - 36) / CANVAS_WIDTH,
+        (frame.clientHeight - 36) / CANVAS_HEIGHT,
+      ),
+      MIN_ZOOM,
+      1,
+    )
+
+    setFitMode(true)
+    setZoom(nextZoom)
+    requestAnimationFrame(() => {
+      frame.scrollLeft = Math.max(0, (CANVAS_WIDTH * nextZoom - frame.clientWidth) / 2)
+      frame.scrollTop = Math.max(0, (CANVAS_HEIGHT * nextZoom - frame.clientHeight) / 2)
+    })
+  }
+
+  function handleCanvasWheel(event) {
+    event.preventDefault()
+    setZoomLevel(zoom + (event.deltaY > 0 ? -0.1 : 0.1))
+  }
+
+  function startPan(event) {
+    if (!isSpacePressed.current) return
+    event.preventDefault()
+    event.currentTarget.setPointerCapture(event.pointerId)
+    panStart.current = {
+      x: event.clientX,
+      y: event.clientY,
+      scrollLeft: event.currentTarget.scrollLeft,
+      scrollTop: event.currentTarget.scrollTop,
+    }
+    setIsPanning(true)
+  }
+
+  function continuePan(event) {
+    if (!isPanning || !panStart.current) return
+    const frame = event.currentTarget
+    frame.scrollLeft = panStart.current.scrollLeft - (event.clientX - panStart.current.x)
+    frame.scrollTop = panStart.current.scrollTop - (event.clientY - panStart.current.y)
+  }
+
+  function finishPan(event) {
+    if (!isPanning) return
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    panStart.current = null
+    setIsPanning(false)
+  }
+
+  function alignSelected(alignment) {
+    if (!selectedId) return
+    const node = stageRef.current?.findOne(`#${selectedId}`)
+    if (!node) return
+
+    const bounds = node.getClientRect({ skipShadow: true })
+    let deltaX = 0
+    let deltaY = 0
+
+    if (alignment === 'left') deltaX = -bounds.x
+    if (alignment === 'center-x') deltaX = CANVAS_WIDTH / 2 - bounds.x - bounds.width / 2
+    if (alignment === 'right') deltaX = CANVAS_WIDTH - bounds.x - bounds.width
+    if (alignment === 'top') deltaY = -bounds.y
+    if (alignment === 'center-y') deltaY = CANVAS_HEIGHT / 2 - bounds.y - bounds.height / 2
+    if (alignment === 'bottom') deltaY = CANVAS_HEIGHT - bounds.y - bounds.height
+
+    updateSelected({
+      x: selectedElement.x + deltaX,
+      y: selectedElement.y + deltaY,
+    })
+  }
+
+  function flipSelected(axis) {
+    if (!selectedId || selectedElement?.type === 'line') return
+    const node = stageRef.current?.findOne(`#${selectedId}`)
+    if (!node) return
+
+    const before = node.getClientRect({ skipShadow: true })
+    const originalScaleX = node.scaleX()
+    const originalScaleY = node.scaleY()
+
+    if (axis === 'x') node.scaleX(-originalScaleX)
+    if (axis === 'y') node.scaleY(-originalScaleY)
+    const after = node.getClientRect({ skipShadow: true })
+    node.scale({ x: originalScaleX, y: originalScaleY })
+
+    updateSelected({
+      x: selectedElement.x + before.x + before.width / 2 - after.x - after.width / 2,
+      y: selectedElement.y + before.y + before.height / 2 - after.y - after.height / 2,
+      scaleX: axis === 'x' ? -(selectedElement.scaleX ?? 1) : (selectedElement.scaleX ?? 1),
+      scaleY: axis === 'y' ? -(selectedElement.scaleY ?? 1) : (selectedElement.scaleY ?? 1),
+    })
+  }
+
+  function applyCropRatio(ratio) {
+    if (selectedElement?.type !== 'image' || selectedElement.kind === 'sticker') return
+
+    const sourceWidth = selectedElement.sourceWidth
+    const sourceHeight = selectedElement.sourceHeight
+    let cropWidth = sourceWidth
+    let cropHeight = sourceHeight
+
+    if (ratio && sourceWidth / sourceHeight > ratio) cropWidth = sourceHeight * ratio
+    if (ratio && sourceWidth / sourceHeight < ratio) cropHeight = sourceWidth / ratio
+
+    const displayMax = Math.max(selectedElement.width, selectedElement.height)
+    const displayRatio = cropWidth / cropHeight
+    const displayWidth = displayRatio >= 1 ? displayMax : displayMax * displayRatio
+    const displayHeight = displayRatio >= 1 ? displayMax / displayRatio : displayMax
+
+    updateSelected({
+      cropX: (sourceWidth - cropWidth) / 2,
+      cropY: (sourceHeight - cropHeight) / 2,
+      cropWidth,
+      cropHeight,
+      width: Math.round(displayWidth),
+      height: Math.round(displayHeight),
+    })
+  }
+
+  useEffect(() => {
+    const frame = canvasFrameRef.current
+    if (!frame) return undefined
+
+    const observer = new ResizeObserver(() => {
+      if (!fitMode) return
+      const nextZoom = clamp(
+        Math.min(
+          (frame.clientWidth - 36) / CANVAS_WIDTH,
+          (frame.clientHeight - 36) / CANVAS_HEIGHT,
+        ),
+        MIN_ZOOM,
+        1,
+      )
+      setZoom(nextZoom)
+    })
+
+    observer.observe(frame)
+    if (fitMode) fitCanvas()
+    return () => observer.disconnect()
+  }, [fitMode])
+
+  useEffect(() => {
+    shortcutActions.current = {
+      deleteSelected,
+      duplicateSelected,
+      fitCanvas,
+      redo,
+      selectedId,
+      setZoomLevel,
+      undo,
+      zoom,
+    }
+  })
+
+  useEffect(() => {
+    function isTypingTarget(target) {
+      return target instanceof HTMLElement
+        && (target.matches('input, textarea, select') || target.isContentEditable)
+    }
+
+    function handleKeyDown(event) {
+      if (event.code === 'Space' && !isTypingTarget(event.target)) {
+        event.preventDefault()
+        isSpacePressed.current = true
+        setSpaceDown(true)
+        return
+      }
+
+      if (isTypingTarget(event.target)) return
+      const hasModifier = event.ctrlKey || event.metaKey
+      const actions = shortcutActions.current
+      if (!actions) return
+
+      if (hasModifier && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) actions.redo()
+        else actions.undo()
+      }
+      if (hasModifier && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        actions.duplicateSelected()
+      }
+      if (hasModifier && event.key === '0') {
+        event.preventDefault()
+        actions.fitCanvas()
+      }
+      if (hasModifier && (event.key === '+' || event.key === '=')) {
+        event.preventDefault()
+        actions.setZoomLevel(actions.zoom + 0.1)
+      }
+      if (hasModifier && event.key === '-') {
+        event.preventDefault()
+        actions.setZoomLevel(actions.zoom - 0.1)
+      }
+      if ((event.key === 'Delete' || event.key === 'Backspace') && actions.selectedId) {
+        event.preventDefault()
+        actions.deleteSelected()
+      }
+    }
+
+    function handleKeyUp(event) {
+      if (event.code !== 'Space') return
+      isSpacePressed.current = false
+      setSpaceDown(false)
+      setIsPanning(false)
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [])
+
   function undo() {
     if (past.length === 0) return
     const previous = past[past.length - 1]
@@ -459,6 +758,8 @@ function EditorScreen({ onBack }) {
   }
 
   function beginDrawing(event) {
+    if (isSpacePressed.current) return
+
     if (tool !== 'brush') {
       if (event.target === event.target.getStage()) setSelectedId(null)
       return
@@ -593,74 +894,107 @@ function EditorScreen({ onBack }) {
 
         <section className="canvas-column" aria-label="Área de edição">
           <div className="history-bar">
-            <div>
+            <div className="history-actions">
               <button type="button" onClick={undo} disabled={past.length === 0}>↶ Desfazer</button>
               <button type="button" onClick={redo} disabled={future.length === 0}>↷ Refazer</button>
             </div>
-            <span>{CANVAS_WIDTH} × {CANVAS_HEIGHT}</span>
+            <div className="zoom-controls" aria-label="Controles de zoom">
+              <button type="button" onClick={() => setZoomLevel(zoom - 0.1)} aria-label="Diminuir zoom">−</button>
+              <button
+                type="button"
+                className={fitMode ? 'is-fit' : ''}
+                onClick={fitCanvas}
+                title="Ajustar à tela (Ctrl+0)"
+              >
+                {Math.round(zoom * 100)}%
+              </button>
+              <button type="button" onClick={() => setZoomLevel(zoom + 0.1)} aria-label="Aumentar zoom">+</button>
+            </div>
+            <span className="canvas-dimensions">{CANVAS_WIDTH} × {CANVAS_HEIGHT}</span>
           </div>
 
-          <div className={`canvas-frame${tool === 'brush' ? ' is-drawing' : ''}`}>
-            <Stage
-              ref={stageRef}
-              width={CANVAS_WIDTH}
-              height={CANVAS_HEIGHT}
-              onMouseDown={beginDrawing}
-              onMouseMove={continueDrawing}
-              onMouseUp={finishDrawing}
-              onMouseLeave={finishDrawing}
-              onTouchStart={beginDrawing}
-              onTouchMove={continueDrawing}
-              onTouchEnd={finishDrawing}
+          <div
+            ref={canvasFrameRef}
+            className={`canvas-frame${tool === 'brush' ? ' is-drawing' : ''}${spaceDown ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}`}
+            onWheel={handleCanvasWheel}
+            onPointerDown={startPan}
+            onPointerMove={continuePan}
+            onPointerUp={finishPan}
+            onPointerCancel={finishPan}
+          >
+            <div
+              className="stage-scaler"
+              style={{
+                width: CANVAS_WIDTH * zoom,
+                height: CANVAS_HEIGHT * zoom,
+              }}
             >
-              <Layer>
-                <Rect width={CANVAS_WIDTH} height={CANVAS_HEIGHT} fill="#dcefff" listening={false} />
-                {baseImage && (
-                  <KonvaImage
-                    image={baseImage}
-                    width={CANVAS_WIDTH}
-                    height={CANVAS_HEIGHT}
-                    listening={false}
-                  />
-                )}
-
-                {elements.map((element) => {
-                  if (element.visible === false) return null
-
-                  if (element.type === 'line') {
-                    return (
-                      <Line
-                        key={element.id}
-                        points={element.points}
-                        stroke={element.stroke}
-                        strokeWidth={element.strokeWidth}
-                        opacity={element.opacity ?? 1}
-                        tension={0.35}
-                        lineCap="round"
-                        lineJoin="round"
+              <div
+                className="stage-transform"
+                style={{ transform: `scale(${zoom})` }}
+              >
+                <Stage
+                  ref={stageRef}
+                  width={CANVAS_WIDTH}
+                  height={CANVAS_HEIGHT}
+                  onMouseDown={beginDrawing}
+                  onMouseMove={continueDrawing}
+                  onMouseUp={finishDrawing}
+                  onMouseLeave={finishDrawing}
+                  onTouchStart={beginDrawing}
+                  onTouchMove={continueDrawing}
+                  onTouchEnd={finishDrawing}
+                >
+                  <Layer>
+                    <Rect width={CANVAS_WIDTH} height={CANVAS_HEIGHT} fill="#dcefff" listening={false} />
+                    {baseImage && (
+                      <KonvaImage
+                        image={baseImage}
+                        width={CANVAS_WIDTH}
+                        height={CANVAS_HEIGHT}
                         listening={false}
                       />
-                    )
-                  }
+                    )}
 
-                  return (
-                    <EditableNode
-                      key={element.id}
-                      element={element}
-                      isInteractive={tool === 'select' && !element.locked}
-                      isSelected={selectedId === element.id && !element.locked}
-                      onSelect={() => {
-                        if (tool === 'select') {
-                          setSelectedId(element.id)
-                          setSidePanel('properties')
-                        }
-                      }}
-                      onChange={updateElement}
-                    />
-                  )
-                })}
-              </Layer>
-            </Stage>
+                    {elements.map((element) => {
+                      if (element.visible === false) return null
+
+                      if (element.type === 'line') {
+                        return (
+                          <Line
+                            key={element.id}
+                            points={element.points}
+                            stroke={element.stroke}
+                            strokeWidth={element.strokeWidth}
+                            opacity={element.opacity ?? 1}
+                            tension={0.35}
+                            lineCap="round"
+                            lineJoin="round"
+                            listening={false}
+                          />
+                        )
+                      }
+
+                      return (
+                        <EditableNode
+                          key={element.id}
+                          element={element}
+                          isInteractive={tool === 'select' && !element.locked}
+                          isSelected={selectedId === element.id && !element.locked}
+                          onSelect={() => {
+                            if (tool === 'select') {
+                              setSelectedId(element.id)
+                              setSidePanel('properties')
+                            }
+                          }}
+                          onChange={updateElement}
+                        />
+                      )
+                    })}
+                  </Layer>
+                </Stage>
+              </div>
+            </div>
           </div>
 
           <p className="editor-status" aria-live="polite">{status}</p>
@@ -877,68 +1211,98 @@ function EditorScreen({ onBack }) {
                     onChange={(event) => updateSelected({ opacity: Number(event.target.value) })}
                   />
 
-                  {selectedElement.type === 'image' && (
-                    <fieldset className="image-adjustments">
-                      <legend>Ajustes da imagem</legend>
-
-                      <label htmlFor="image-brightness">
-                        Brilho: {Math.round((selectedElement.brightness ?? 1) * 100)}%
-                      </label>
-                      <input
-                        id="image-brightness"
-                        type="range"
-                        min="0"
-                        max="2"
-                        step="0.05"
-                        value={selectedElement.brightness ?? 1}
-                        onChange={(event) => updateSelected({ brightness: Number(event.target.value) })}
-                      />
-
-                      <label htmlFor="image-contrast">Contraste: {selectedElement.contrast ?? 0}</label>
-                      <input
-                        id="image-contrast"
-                        type="range"
-                        min="-100"
-                        max="100"
-                        value={selectedElement.contrast ?? 0}
-                        onChange={(event) => updateSelected({ contrast: Number(event.target.value) })}
-                      />
-
-                      <label htmlFor="image-saturation">
-                        Saturação: {Math.round((selectedElement.saturation ?? 0) * 100)}
-                      </label>
-                      <input
-                        id="image-saturation"
-                        type="range"
-                        min="-1"
-                        max="1"
-                        step="0.05"
-                        value={selectedElement.saturation ?? 0}
-                        onChange={(event) => updateSelected({ saturation: Number(event.target.value) })}
-                      />
-
-                      <label htmlFor="image-blur">Desfoque: {selectedElement.blur ?? 0}px</label>
-                      <input
-                        id="image-blur"
-                        type="range"
-                        min="0"
-                        max="24"
-                        value={selectedElement.blur ?? 0}
-                        onChange={(event) => updateSelected({ blur: Number(event.target.value) })}
-                      />
-
-                      <label className="checkbox-control">
-                        <input
-                          type="checkbox"
-                          checked={selectedElement.grayscale ?? false}
-                          onChange={(event) => updateSelected({ grayscale: event.target.checked })}
-                        />
-                        Preto e branco
-                      </label>
-                      <button className="reset-adjustments" type="button" onClick={resetImageAdjustments}>
-                        Restaurar ajustes
-                      </button>
+                  {selectedElement.type !== 'line' && (
+                    <fieldset className="transform-controls">
+                      <legend>Transformar e alinhar</legend>
+                      <div className="alignment-grid" aria-label="Alinhamento no canvas">
+                        <button type="button" onClick={() => alignSelected('left')} title="Alinhar à esquerda">⇤</button>
+                        <button type="button" onClick={() => alignSelected('center-x')} title="Centralizar horizontalmente">↔</button>
+                        <button type="button" onClick={() => alignSelected('right')} title="Alinhar à direita">⇥</button>
+                        <button type="button" onClick={() => alignSelected('top')} title="Alinhar ao topo">↥</button>
+                        <button type="button" onClick={() => alignSelected('center-y')} title="Centralizar verticalmente">↕</button>
+                        <button type="button" onClick={() => alignSelected('bottom')} title="Alinhar à base">↧</button>
+                      </div>
+                      <div className="flip-buttons">
+                        <button type="button" onClick={() => flipSelected('x')}>Virar horizontal</button>
+                        <button type="button" onClick={() => flipSelected('y')}>Virar vertical</button>
+                      </div>
                     </fieldset>
+                  )}
+
+                  {selectedElement.type === 'image' && (
+                    <>
+                      <fieldset className="image-adjustments">
+                        <legend>Ajustes da imagem</legend>
+
+                        <label htmlFor="image-brightness">
+                          Brilho: {Math.round((selectedElement.brightness ?? 1) * 100)}%
+                        </label>
+                        <input
+                          id="image-brightness"
+                          type="range"
+                          min="0"
+                          max="2"
+                          step="0.05"
+                          value={selectedElement.brightness ?? 1}
+                          onChange={(event) => updateSelected({ brightness: Number(event.target.value) })}
+                        />
+
+                        <label htmlFor="image-contrast">Contraste: {selectedElement.contrast ?? 0}</label>
+                        <input
+                          id="image-contrast"
+                          type="range"
+                          min="-100"
+                          max="100"
+                          value={selectedElement.contrast ?? 0}
+                          onChange={(event) => updateSelected({ contrast: Number(event.target.value) })}
+                        />
+
+                        <label htmlFor="image-saturation">
+                          Saturação: {Math.round((selectedElement.saturation ?? 0) * 100)}
+                        </label>
+                        <input
+                          id="image-saturation"
+                          type="range"
+                          min="-1"
+                          max="1"
+                          step="0.05"
+                          value={selectedElement.saturation ?? 0}
+                          onChange={(event) => updateSelected({ saturation: Number(event.target.value) })}
+                        />
+
+                        <label htmlFor="image-blur">Desfoque: {selectedElement.blur ?? 0}px</label>
+                        <input
+                          id="image-blur"
+                          type="range"
+                          min="0"
+                          max="24"
+                          value={selectedElement.blur ?? 0}
+                          onChange={(event) => updateSelected({ blur: Number(event.target.value) })}
+                        />
+
+                        <label className="checkbox-control">
+                          <input
+                            type="checkbox"
+                            checked={selectedElement.grayscale ?? false}
+                            onChange={(event) => updateSelected({ grayscale: event.target.checked })}
+                          />
+                          Preto e branco
+                        </label>
+                        <button className="reset-adjustments" type="button" onClick={resetImageAdjustments}>
+                          Restaurar ajustes
+                        </button>
+                      </fieldset>
+
+                      {selectedElement.kind !== 'sticker' && (
+                        <fieldset className="crop-controls">
+                          <legend>Recorte central</legend>
+                          <button type="button" onClick={() => applyCropRatio(null)}>Original</button>
+                          <button type="button" onClick={() => applyCropRatio(1)}>1:1</button>
+                          <button type="button" onClick={() => applyCropRatio(4 / 5)}>4:5</button>
+                          <button type="button" onClick={() => applyCropRatio(16 / 9)}>16:9</button>
+                        </fieldset>
+                      )}
+                    </>
                   )}
 
                   <div className="layer-buttons" aria-label="Ordem da camada">

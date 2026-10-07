@@ -53,6 +53,9 @@ rápidas durante uma rodada competitiva.
 - Imagem-base e importação local.
 - Texto, formas e stickers.
 - Seleção, movimento, escala e rotação.
+- Zoom, ajuste à tela e pan temporário com a tecla Espaço.
+- Encaixe em centro e bordas do canvas.
+- Alinhamento, flip horizontal/vertical e recorte central por proporção.
 - Pincel.
 - Camadas com ordem, visibilidade, bloqueio, duplicação, exclusão e opacidade.
 - Brilho, contraste, saturação, desfoque e preto e branco por imagem.
@@ -60,11 +63,11 @@ rápidas durante uma rodada competitiva.
 
 ## Próximas entregas
 
-1. Zoom, pan, encaixe e atalhos de teclado.
-2. Recorte, flip horizontal/vertical e tamanho do documento.
-3. Borracha, conta-gotas e melhorias do pincel.
-4. Tipografia avançada e estilos de texto.
-5. Salvamento automático e restauração de sessão.
+1. Borracha, conta-gotas e melhorias do pincel.
+2. Tipografia avançada e estilos de texto.
+3. Redimensionamento do documento e recorte manual livre.
+4. Salvamento automático e restauração de sessão.
+5. Testes automatizados das interações do editor.
 
 ## Fora do primeiro MVP
 
@@ -74,4 +77,3 @@ rápidas durante uma rodada competitiva.
 - Canais, edição CMYK e gerenciamento de cor avançado.
 - Seleção inteligente por IA.
 - Plugins compatíveis com Photoshop.
-

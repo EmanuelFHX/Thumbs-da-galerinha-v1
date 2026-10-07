@@ -28,6 +28,18 @@ npm run build
 - Stickers próprios em SVG.
 - Painel de camadas com ordem, visibilidade, bloqueio, duplicação e opacidade.
 - Ajustes não destrutivos de brilho, contraste, saturação, desfoque e preto e branco.
+- Zoom, ajuste à tela, pan com Espaço e encaixe no centro/bordas.
+- Alinhamento, flip horizontal/vertical e recorte central por proporção.
 - Exclusão, desfazer, refazer e exportação PNG.
+
+## Atalhos
+
+- `Ctrl+Z`: desfazer.
+- `Ctrl+Shift+Z`: refazer.
+- `Ctrl+D`: duplicar a camada selecionada.
+- `Ctrl+0`: ajustar o canvas à tela.
+- `Ctrl++` / `Ctrl+-`: controlar o zoom.
+- `Delete` ou `Backspace`: excluir a seleção.
+- `Espaço` + arrastar: mover a visualização.
 
 As funcionalidades desta pasta devem ser desenvolvidas na branch `frontend`.
