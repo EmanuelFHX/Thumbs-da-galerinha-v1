@@ -58,16 +58,17 @@ rápidas durante uma rodada competitiva.
 - Alinhamento, flip horizontal/vertical e recorte central por proporção.
 - Pincel com predefinições, opacidade e suavidade.
 - Borracha não destrutiva em camada própria e conta-gotas.
+- Texto com fontes, peso, itálico, sublinhado, alinhamento, espaçamento, entrelinhas, contorno e sombra.
+- Presets de texto Doodle, Meme e Pop.
 - Camadas com ordem, visibilidade, bloqueio, duplicação, exclusão e opacidade.
 - Brilho, contraste, saturação, desfoque e preto e branco por imagem.
 - Desfazer, refazer e exportação PNG.
 
 ## Próximas entregas
 
-1. Tipografia avançada e estilos de texto.
-2. Redimensionamento do documento e recorte manual livre.
-3. Salvamento automático e restauração de sessão.
-4. Testes automatizados das interações do editor.
+1. Redimensionamento do documento e recorte manual livre.
+2. Salvamento automático e restauração de sessão.
+3. Testes automatizados das interações do editor.
 
 ## Fora do primeiro MVP
 

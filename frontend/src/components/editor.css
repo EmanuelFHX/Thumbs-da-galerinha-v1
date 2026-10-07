@@ -361,9 +361,9 @@
   font-weight: 900;
 }
 
-.property-group textarea {
+.property-group textarea,
+.property-group select {
   width: 100%;
-  resize: vertical;
   padding: 10px;
   border: 2px solid var(--ink);
   border-radius: 5px;
@@ -371,6 +371,118 @@
   background: var(--paper);
   font: inherit;
   font-weight: 750;
+}
+
+.property-group textarea {
+  resize: vertical;
+}
+
+.property-group select {
+  cursor: pointer;
+}
+
+.typography-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+
+.typography-presets button {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  padding: 7px 3px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.62rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.typography-presets button:nth-child(2) span {
+  font-family: Impact, sans-serif;
+}
+
+.typography-presets button:nth-child(3) span {
+  color: var(--pink);
+  font-style: italic;
+}
+
+.typography-presets button span {
+  font-family: var(--display-font);
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.typography-presets button:hover {
+  background: var(--yellow);
+  transform: translate(-1px, -1px);
+}
+
+.text-style-grid,
+.text-alignment {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.text-style-grid button,
+.text-alignment button {
+  min-height: 34px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.text-style-grid button.is-active,
+.text-alignment button.is-active {
+  background: var(--yellow);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.align-icon {
+  display: block;
+  line-height: 1;
+}
+
+.align-left {
+  text-align: left;
+}
+
+.align-center {
+  text-align: center;
+}
+
+.align-right {
+  text-align: right;
+}
+
+.color-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.color-pair label,
+.shadow-controls label:first-child {
+  display: grid;
+  gap: 7px;
+}
+
+.shadow-controls {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 2px dashed rgba(37, 35, 43, 0.42);
+  border-radius: 5px;
+  background: rgba(255, 247, 232, 0.55);
 }
 
 .property-group input[type='color'] {

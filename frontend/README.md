@@ -22,7 +22,8 @@ npm run build
 
 ## Editor implementado
 
-- Texto, retângulo e círculo com seleção e transformação.
+- Texto com presets, fontes, peso, alinhamento, espaçamento, contorno e sombra.
+- Retângulo e círculo com seleção e transformação.
 - Pincel com predefinições, cor, espessura, opacidade e suavidade.
 - Borracha não destrutiva e conta-gotas para capturar cores do canvas.
 - Importação local de PNG, JPEG e WebP de até 8 MB.
