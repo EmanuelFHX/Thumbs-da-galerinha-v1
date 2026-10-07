@@ -98,8 +98,8 @@
   display: grid;
   place-items: center;
   gap: 4px;
-  min-height: 70px;
-  padding: 8px 5px;
+  min-height: 56px;
+  padding: 6px 5px;
   border: 2px solid transparent;
   border-radius: 6px;
   color: var(--ink-soft);
@@ -228,6 +228,10 @@
   cursor: crosshair;
 }
 
+.canvas-frame.is-eyedropper canvas {
+  cursor: cell;
+}
+
 .canvas-frame.is-pan-ready,
 .canvas-frame.is-pan-ready canvas {
   cursor: grab !important;
@@ -318,6 +322,37 @@
 .property-group {
   display: grid;
   gap: 10px;
+}
+
+.property-group h3 {
+  margin: 0 0 4px;
+  font-family: var(--display-font);
+  font-size: 1rem;
+}
+
+.brush-presets {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.brush-presets button {
+  min-width: 0;
+  padding: 8px 4px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 0.62rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.brush-presets button:hover {
+  background: var(--yellow);
+  transform: translate(-1px, -1px);
 }
 
 .property-group label {
@@ -643,6 +678,44 @@
   min-height: 230px;
   color: var(--ink-soft);
   text-align: center;
+}
+
+.tool-hint {
+  display: grid;
+  place-items: center;
+  min-height: 230px;
+  padding: 18px 8px;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.tool-hint span {
+  color: var(--blue);
+  font-size: 3.2rem;
+  line-height: 1;
+  transform: rotate(-12deg);
+}
+
+.tool-hint h3 {
+  margin: 8px 0 0;
+  color: var(--ink);
+  font-family: var(--display-font);
+}
+
+.tool-hint p {
+  margin: 8px 0 14px;
+  font-size: 0.76rem;
+  font-weight: 750;
+  line-height: 1.5;
+}
+
+.tool-hint strong {
+  padding: 7px 10px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  background: var(--paper);
+  font-family: ui-monospace, Consolas, monospace;
+  box-shadow: 3px 3px 0 var(--ink);
 }
 
 .empty-properties span {

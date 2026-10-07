@@ -1,6 +1,6 @@
 # Escopo do editor — núcleo inspirado no Photoshop
 
-Atualizado em: 2026-10-06
+Atualizado em: 2026-10-07
 
 O editor deve oferecer as ferramentas fundamentais de composição e tratamento de
 imagem sem tentar reproduzir todo o Photoshop. A prioridade é permitir criações
@@ -56,18 +56,18 @@ rápidas durante uma rodada competitiva.
 - Zoom, ajuste à tela e pan temporário com a tecla Espaço.
 - Encaixe em centro e bordas do canvas.
 - Alinhamento, flip horizontal/vertical e recorte central por proporção.
-- Pincel.
+- Pincel com predefinições, opacidade e suavidade.
+- Borracha não destrutiva em camada própria e conta-gotas.
 - Camadas com ordem, visibilidade, bloqueio, duplicação, exclusão e opacidade.
 - Brilho, contraste, saturação, desfoque e preto e branco por imagem.
 - Desfazer, refazer e exportação PNG.
 
 ## Próximas entregas
 
-1. Borracha, conta-gotas e melhorias do pincel.
-2. Tipografia avançada e estilos de texto.
-3. Redimensionamento do documento e recorte manual livre.
-4. Salvamento automático e restauração de sessão.
-5. Testes automatizados das interações do editor.
+1. Tipografia avançada e estilos de texto.
+2. Redimensionamento do documento e recorte manual livre.
+3. Salvamento automático e restauração de sessão.
+4. Testes automatizados das interações do editor.
 
 ## Fora do primeiro MVP
 

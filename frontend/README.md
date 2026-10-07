@@ -23,7 +23,8 @@ npm run build
 ## Editor implementado
 
 - Texto, retângulo e círculo com seleção e transformação.
-- Pincel com ajuste de cor e espessura.
+- Pincel com predefinições, cor, espessura, opacidade e suavidade.
+- Borracha não destrutiva e conta-gotas para capturar cores do canvas.
 - Importação local de PNG, JPEG e WebP de até 8 MB.
 - Stickers próprios em SVG.
 - Painel de camadas com ordem, visibilidade, bloqueio, duplicação e opacidade.
@@ -41,5 +42,8 @@ npm run build
 - `Ctrl++` / `Ctrl+-`: controlar o zoom.
 - `Delete` ou `Backspace`: excluir a seleção.
 - `Espaço` + arrastar: mover a visualização.
+- `B`: selecionar o pincel.
+- `E`: selecionar a borracha.
+- `I`: selecionar o conta-gotas.
 
 As funcionalidades desta pasta devem ser desenvolvidas na branch `frontend`.
