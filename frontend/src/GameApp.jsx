@@ -1,9 +1,16 @@
-import { useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import './game.css'
 
 const ROOM_CODE_LENGTH = 6
+const EditorScreen = lazy(() => import('./components/EditorScreen.jsx'))
+
+function getInitialScreen() {
+  const requestedScreen = new URLSearchParams(window.location.search).get('screen')
+  return requestedScreen === 'editor' ? 'editor' : 'menu'
+}
 
 function GameApp() {
+  const [screen, setScreen] = useState(getInitialScreen)
   const [roomCode, setRoomCode] = useState('')
   const [notice, setNotice] = useState('')
 
@@ -11,7 +18,7 @@ function GameApp() {
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
 
   function handleCreateGame() {
-    setNotice('O modo local será a primeira partida jogável.')
+    setScreen('editor')
   }
 
   function handleJoinGame(event) {
@@ -28,6 +35,14 @@ function GameApp() {
 
     setRoomCode(nextCode)
     setNotice('')
+  }
+
+  if (screen === 'editor') {
+    return (
+      <Suspense fallback={<div className="screen-loading">Preparando o editor…</div>}>
+        <EditorScreen onBack={() => setScreen('menu')} />
+      </Suspense>
+    )
   }
 
   return (

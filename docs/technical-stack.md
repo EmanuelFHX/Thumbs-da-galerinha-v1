@@ -10,6 +10,7 @@ Atualizado em: 2026-10-06
 | Linguagem | JavaScript |
 | Frontend | React com JavaScript |
 | Build e desenvolvimento | Vite |
+| Canvas do editor | Konva com integração `react-konva` |
 | Backend | Ecossistema JavaScript, com Node.js como runtime planejado |
 | Organização Git | Trabalho de frontend na branch `frontend`; backend na branch `backend` |
 
@@ -24,7 +25,6 @@ Atualizado em: 2026-10-06
 
 ## Decisões ainda abertas
 
-- Biblioteca responsável pelo canvas e manipulação dos elementos.
 - Framework HTTP do backend.
 - Tecnologia de comunicação em tempo real.
 - Banco de dados e armazenamento das imagens.
