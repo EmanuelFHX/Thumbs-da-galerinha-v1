@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import Konva from 'konva'
 import {
   Circle,
   Image as KonvaImage,
@@ -25,6 +26,12 @@ function getInitialTool() {
   return new URLSearchParams(window.location.search).get('tool') === 'stickers'
     ? 'stickers'
     : 'select'
+}
+
+function getInitialSidePanel() {
+  return new URLSearchParams(window.location.search).get('panel') === 'layers'
+    ? 'layers'
+    : 'properties'
 }
 
 function createId(prefix) {
@@ -62,6 +69,21 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
     transformerRef.current.getLayer().batchDraw()
   }, [elementImage, isSelected])
 
+  useEffect(() => {
+    if (element.type !== 'image' || !elementImage || !nodeRef.current) return
+    nodeRef.current.clearCache()
+    nodeRef.current.cache({ pixelRatio: 1 })
+    nodeRef.current.getLayer()?.batchDraw()
+  }, [
+    element.blur,
+    element.brightness,
+    element.contrast,
+    element.grayscale,
+    element.saturation,
+    element.type,
+    elementImage,
+  ])
+
   const sharedProps = {
     ref: nodeRef,
     x: element.x,
@@ -69,6 +91,7 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
     rotation: element.rotation ?? 0,
     scaleX: element.scaleX ?? 1,
     scaleY: element.scaleY ?? 1,
+    opacity: element.opacity ?? 1,
     draggable: isInteractive,
     listening: isInteractive,
     onClick: onSelect,
@@ -143,12 +166,25 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
   }
 
   if (element.type === 'image' && elementImage) {
+    const imageFilters = [
+      Konva.Filters.Brightness,
+      Konva.Filters.Contrast,
+      Konva.Filters.HSL,
+      Konva.Filters.Blur,
+    ]
+    if (element.grayscale) imageFilters.push(Konva.Filters.Grayscale)
+
     shape = (
       <KonvaImage
         {...sharedProps}
         image={elementImage}
         width={element.width}
         height={element.height}
+        filters={imageFilters}
+        brightness={element.brightness ?? 1}
+        contrast={element.contrast ?? 0}
+        saturation={element.saturation ?? 0}
+        blurRadius={element.blur ?? 0}
         shadowColor="#25232b"
         shadowOffset={{ x: 7, y: 7 }}
         shadowOpacity={0.48}
@@ -195,6 +231,14 @@ function ToolButton({ active = false, children, onClick, title }) {
   )
 }
 
+function getLayerLabel(element, index) {
+  if (element.type === 'text') return element.text || 'Texto vazio'
+  if (element.type === 'image') return element.source.startsWith('/stickers/') ? 'Sticker' : 'Imagem'
+  if (element.type === 'line') return `Traço ${index + 1}`
+  if (element.type === 'circle') return 'Círculo'
+  return 'Retângulo'
+}
+
 function EditorScreen({ onBack }) {
   const stageRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -203,6 +247,7 @@ function EditorScreen({ onBack }) {
   const baseImage = useCanvasImage('/sample-base.svg')
 
   const [tool, setTool] = useState(getInitialTool)
+  const [sidePanel, setSidePanel] = useState(getInitialSidePanel)
   const [brushColor, setBrushColor] = useState('#ff5c7a')
   const [brushSize, setBrushSize] = useState(10)
   const [selectedId, setSelectedId] = useState(null)
@@ -234,6 +279,7 @@ function EditorScreen({ onBack }) {
     commit([...elements, nextElement], 'Texto adicionado. Arraste ou redimensione pelas alças.')
     setSelectedId(nextElement.id)
     setTool('select')
+    setSidePanel('properties')
   }
 
   function addShape(type) {
@@ -260,6 +306,7 @@ function EditorScreen({ onBack }) {
     commit([...elements, nextElement], 'Forma adicionada ao canvas.')
     setSelectedId(nextElement.id)
     setTool('select')
+    setSidePanel('properties')
   }
 
   function addImage(source, width, height, message) {
@@ -276,11 +323,17 @@ function EditorScreen({ onBack }) {
       y: Math.round((CANVAS_HEIGHT - nextHeight) / 2),
       width: nextWidth,
       height: nextHeight,
+      brightness: 1,
+      contrast: 0,
+      saturation: 0,
+      blur: 0,
+      grayscale: false,
     }
 
     commit([...elements, nextElement], message)
     setSelectedId(nextElement.id)
     setTool('select')
+    setSidePanel('properties')
   }
 
   function addSticker(sticker) {
@@ -350,6 +403,39 @@ function EditorScreen({ onBack }) {
     const [movedElement] = reordered.splice(currentIndex, 1)
     reordered.splice(nextIndex, 0, movedElement)
     commit(reordered, direction > 0 ? 'Elemento movido para frente.' : 'Elemento movido para trás.')
+  }
+
+  function duplicateSelected() {
+    if (!selectedElement) return
+    const duplicate = {
+      ...selectedElement,
+      id: createId(selectedElement.type),
+      x: selectedElement.x + 24,
+      y: selectedElement.y + 24,
+      locked: false,
+      visible: true,
+    }
+    commit([...elements, duplicate], 'Elemento duplicado.')
+    setSelectedId(duplicate.id)
+  }
+
+  function toggleLayerVisibility(element) {
+    updateElement({ ...element, visible: element.visible === false })
+    if (element.id === selectedId && element.visible !== false) setSelectedId(null)
+  }
+
+  function toggleLayerLock(element) {
+    updateElement({ ...element, locked: !element.locked })
+  }
+
+  function resetImageAdjustments() {
+    updateSelected({
+      brightness: 1,
+      contrast: 0,
+      saturation: 0,
+      blur: 0,
+      grayscale: false,
+    })
   }
 
   function undo() {
@@ -539,6 +625,8 @@ function EditorScreen({ onBack }) {
                 )}
 
                 {elements.map((element) => {
+                  if (element.visible === false) return null
+
                   if (element.type === 'line') {
                     return (
                       <Line
@@ -546,6 +634,7 @@ function EditorScreen({ onBack }) {
                         points={element.points}
                         stroke={element.stroke}
                         strokeWidth={element.strokeWidth}
+                        opacity={element.opacity ?? 1}
                         tension={0.35}
                         lineCap="round"
                         lineJoin="round"
@@ -558,10 +647,13 @@ function EditorScreen({ onBack }) {
                     <EditableNode
                       key={element.id}
                       element={element}
-                      isInteractive={tool === 'select'}
-                      isSelected={selectedId === element.id}
+                      isInteractive={tool === 'select' && !element.locked}
+                      isSelected={selectedId === element.id && !element.locked}
                       onSelect={() => {
-                        if (tool === 'select') setSelectedId(element.id)
+                        if (tool === 'select') {
+                          setSelectedId(element.id)
+                          setSidePanel('properties')
+                        }
                       }}
                       onChange={updateElement}
                     />
@@ -574,112 +666,306 @@ function EditorScreen({ onBack }) {
           <p className="editor-status" aria-live="polite">{status}</p>
         </section>
 
-        <aside className="properties-panel" aria-label="Propriedades">
+        <aside className="properties-panel" aria-label="Painel lateral do editor">
           <div className="panel-tape" aria-hidden="true" />
-          <h2>Propriedades</h2>
+          <div className="panel-tabs" role="tablist" aria-label="Painéis do editor">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidePanel === 'properties'}
+              className={sidePanel === 'properties' ? 'is-active' : ''}
+              onClick={() => setSidePanel('properties')}
+            >
+              Ajustes
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidePanel === 'layers'}
+              className={sidePanel === 'layers' ? 'is-active' : ''}
+              onClick={() => setSidePanel('layers')}
+            >
+              Camadas <span>{elements.length + 1}</span>
+            </button>
+          </div>
 
-          {tool === 'brush' && (
-            <div className="property-group">
-              <label htmlFor="brush-color">Cor do pincel</label>
-              <input
-                id="brush-color"
-                type="color"
-                value={brushColor}
-                onChange={(event) => setBrushColor(event.target.value)}
-              />
-              <label htmlFor="brush-size">Espessura: {brushSize}px</label>
-              <input
-                id="brush-size"
-                type="range"
-                min="3"
-                max="32"
-                value={brushSize}
-                onChange={(event) => setBrushSize(Number(event.target.value))}
-              />
-            </div>
-          )}
-
-          {tool === 'stickers' && (
-            <div className="sticker-picker">
-              <p>Escolha um sticker</p>
-              <div className="sticker-grid">
-                {STICKERS.map((sticker) => (
+          {sidePanel === 'layers' ? (
+            <div className="layers-panel" role="tabpanel">
+              <div className="layer-list">
+                {[...elements].reverse().map((element, reversedIndex) => {
+                  const originalIndex = elements.length - reversedIndex - 1
+                  const isCurrent = element.id === selectedId
+                  return (
+                    <div
+                      key={element.id}
+                      className={`layer-item${isCurrent ? ' is-selected' : ''}${element.visible === false ? ' is-hidden' : ''}`}
+                    >
+                      <button
+                        className="layer-select"
+                        type="button"
+                        onClick={() => {
+                          if (element.visible === false) return
+                          setSelectedId(element.id)
+                          setTool('select')
+                          setSidePanel('properties')
+                        }}
+                      >
+                        <span className="layer-kind" aria-hidden="true">
+                          {element.type === 'text' ? 'T' : element.type === 'line' ? '✎' : '▧'}
+                        </span>
+                        <span>{getLayerLabel(element, originalIndex)}</span>
+                      </button>
+                      <button
+                        className="layer-action"
+                        type="button"
+                        onClick={() => toggleLayerVisibility(element)}
+                        aria-label={element.visible === false ? 'Mostrar camada' : 'Ocultar camada'}
+                        title={element.visible === false ? 'Mostrar' : 'Ocultar'}
+                      >
+                        {element.visible === false ? '○' : '●'}
+                      </button>
+                      <button
+                        className="layer-action"
+                        type="button"
+                        onClick={() => toggleLayerLock(element)}
+                        aria-label={element.locked ? 'Desbloquear camada' : 'Bloquear camada'}
+                        title={element.locked ? 'Desbloquear' : 'Bloquear'}
+                      >
+                        {element.locked ? '◆' : '◇'}
+                      </button>
+                    </div>
+                  )
+                })}
+                <div className="layer-item is-background">
+                  <div className="layer-select">
+                    <span className="layer-kind" aria-hidden="true">▧</span>
+                    <span>Imagem-base</span>
+                  </div>
                   <button
-                    key={sticker.source}
+                    className="layer-action"
                     type="button"
-                    onClick={() => addSticker(sticker)}
-                    aria-label={`Adicionar sticker ${sticker.name}`}
+                    aria-label="A camada base está visível"
+                    title="Visível"
+                    disabled
                   >
-                    <img src={sticker.source} alt="" />
-                    <span>{sticker.name}</span>
+                    ●
                   </button>
-                ))}
+                  <button
+                    className="layer-action"
+                    type="button"
+                    aria-label="A camada base está bloqueada"
+                    title="Bloqueada"
+                    disabled
+                  >
+                    ◆
+                  </button>
+                </div>
               </div>
             </div>
-          )}
+          ) : (
+            <div role="tabpanel">
+              <h2>Propriedades</h2>
 
-          {tool !== 'brush' && tool !== 'stickers' && !selectedElement && (
-            <div className="empty-properties">
-              <span aria-hidden="true">↖</span>
-              <p>Selecione um texto ou forma no canvas para editar.</p>
-            </div>
-          )}
-
-          {selectedElement && selectedElement.type !== 'line' && (
-            <div className="property-group">
-              {selectedElement.type === 'text' && (
-                <>
-                  <label htmlFor="element-text">Texto</label>
-                  <textarea
-                    id="element-text"
-                    rows="4"
-                    value={selectedElement.text}
-                    onChange={(event) => updateSelected({ text: event.target.value })}
-                  />
-                  <label htmlFor="font-size">Tamanho: {selectedElement.fontSize}px</label>
+              {tool === 'brush' && (
+                <div className="property-group">
+                  <label htmlFor="brush-color">Cor do pincel</label>
                   <input
-                    id="font-size"
-                    type="range"
-                    min="20"
-                    max="120"
-                    value={selectedElement.fontSize}
-                    onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })}
-                  />
-                </>
-              )}
-
-              {selectedElement.type !== 'image' && (
-                <>
-                  <label htmlFor="element-color">Cor</label>
-                  <input
-                    id="element-color"
+                    id="brush-color"
                     type="color"
-                    value={selectedElement.fill}
-                    onChange={(event) => updateSelected({ fill: event.target.value })}
+                    value={brushColor}
+                    onChange={(event) => setBrushColor(event.target.value)}
                   />
-                </>
+                  <label htmlFor="brush-size">Espessura: {brushSize}px</label>
+                  <input
+                    id="brush-size"
+                    type="range"
+                    min="3"
+                    max="32"
+                    value={brushSize}
+                    onChange={(event) => setBrushSize(Number(event.target.value))}
+                  />
+                </div>
               )}
 
-              <div className="layer-buttons" aria-label="Ordem da camada">
-                <button
-                  type="button"
-                  onClick={() => moveSelected(-1)}
-                  disabled={elements.findIndex((element) => element.id === selectedId) <= 0}
-                >
-                  ↓ Para trás
-                </button>
-                <button
-                  type="button"
-                  onClick={() => moveSelected(1)}
-                  disabled={elements.findIndex((element) => element.id === selectedId) === elements.length - 1}
-                >
-                  ↑ Para frente
-                </button>
-              </div>
+              {tool === 'stickers' && (
+                <div className="sticker-picker">
+                  <p>Escolha um sticker</p>
+                  <div className="sticker-grid">
+                    {STICKERS.map((sticker) => (
+                      <button
+                        key={sticker.source}
+                        type="button"
+                        onClick={() => addSticker(sticker)}
+                        aria-label={`Adicionar sticker ${sticker.name}`}
+                      >
+                        <img src={sticker.source} alt="" />
+                        <span>{sticker.name}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-              <button className="delete-button" type="button" onClick={deleteSelected}>
-                Excluir elemento
-              </button>
+              {tool !== 'brush' && tool !== 'stickers' && !selectedElement && (
+                <div className="empty-properties">
+                  <span aria-hidden="true">↖</span>
+                  <p>Selecione um elemento ou abra a aba de camadas.</p>
+                </div>
+              )}
+
+              {selectedElement && (
+                <div className="property-group">
+                  {selectedElement.locked && (
+                    <p className="locked-note">Camada bloqueada. Desbloqueie-a na aba Camadas para mover.</p>
+                  )}
+
+                  {selectedElement.type === 'text' && (
+                    <>
+                      <label htmlFor="element-text">Texto</label>
+                      <textarea
+                        id="element-text"
+                        rows="3"
+                        value={selectedElement.text}
+                        onChange={(event) => updateSelected({ text: event.target.value })}
+                      />
+                      <label htmlFor="font-size">Tamanho: {selectedElement.fontSize}px</label>
+                      <input
+                        id="font-size"
+                        type="range"
+                        min="20"
+                        max="120"
+                        value={selectedElement.fontSize}
+                        onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })}
+                      />
+                    </>
+                  )}
+
+                  {selectedElement.type !== 'image' && selectedElement.type !== 'line' && (
+                    <>
+                      <label htmlFor="element-color">Cor</label>
+                      <input
+                        id="element-color"
+                        type="color"
+                        value={selectedElement.fill}
+                        onChange={(event) => updateSelected({ fill: event.target.value })}
+                      />
+                    </>
+                  )}
+
+                  {selectedElement.type === 'line' && (
+                    <>
+                      <label htmlFor="line-color">Cor do traço</label>
+                      <input
+                        id="line-color"
+                        type="color"
+                        value={selectedElement.stroke}
+                        onChange={(event) => updateSelected({ stroke: event.target.value })}
+                      />
+                    </>
+                  )}
+
+                  <label htmlFor="element-opacity">
+                    Opacidade: {Math.round((selectedElement.opacity ?? 1) * 100)}%
+                  </label>
+                  <input
+                    id="element-opacity"
+                    type="range"
+                    min="0.1"
+                    max="1"
+                    step="0.05"
+                    value={selectedElement.opacity ?? 1}
+                    onChange={(event) => updateSelected({ opacity: Number(event.target.value) })}
+                  />
+
+                  {selectedElement.type === 'image' && (
+                    <fieldset className="image-adjustments">
+                      <legend>Ajustes da imagem</legend>
+
+                      <label htmlFor="image-brightness">
+                        Brilho: {Math.round((selectedElement.brightness ?? 1) * 100)}%
+                      </label>
+                      <input
+                        id="image-brightness"
+                        type="range"
+                        min="0"
+                        max="2"
+                        step="0.05"
+                        value={selectedElement.brightness ?? 1}
+                        onChange={(event) => updateSelected({ brightness: Number(event.target.value) })}
+                      />
+
+                      <label htmlFor="image-contrast">Contraste: {selectedElement.contrast ?? 0}</label>
+                      <input
+                        id="image-contrast"
+                        type="range"
+                        min="-100"
+                        max="100"
+                        value={selectedElement.contrast ?? 0}
+                        onChange={(event) => updateSelected({ contrast: Number(event.target.value) })}
+                      />
+
+                      <label htmlFor="image-saturation">
+                        Saturação: {Math.round((selectedElement.saturation ?? 0) * 100)}
+                      </label>
+                      <input
+                        id="image-saturation"
+                        type="range"
+                        min="-1"
+                        max="1"
+                        step="0.05"
+                        value={selectedElement.saturation ?? 0}
+                        onChange={(event) => updateSelected({ saturation: Number(event.target.value) })}
+                      />
+
+                      <label htmlFor="image-blur">Desfoque: {selectedElement.blur ?? 0}px</label>
+                      <input
+                        id="image-blur"
+                        type="range"
+                        min="0"
+                        max="24"
+                        value={selectedElement.blur ?? 0}
+                        onChange={(event) => updateSelected({ blur: Number(event.target.value) })}
+                      />
+
+                      <label className="checkbox-control">
+                        <input
+                          type="checkbox"
+                          checked={selectedElement.grayscale ?? false}
+                          onChange={(event) => updateSelected({ grayscale: event.target.checked })}
+                        />
+                        Preto e branco
+                      </label>
+                      <button className="reset-adjustments" type="button" onClick={resetImageAdjustments}>
+                        Restaurar ajustes
+                      </button>
+                    </fieldset>
+                  )}
+
+                  <div className="layer-buttons" aria-label="Ordem da camada">
+                    <button
+                      type="button"
+                      onClick={() => moveSelected(-1)}
+                      disabled={elements.findIndex((element) => element.id === selectedId) <= 0}
+                    >
+                      ↓ Para trás
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => moveSelected(1)}
+                      disabled={elements.findIndex((element) => element.id === selectedId) === elements.length - 1}
+                    >
+                      ↑ Para frente
+                    </button>
+                  </div>
+
+                  <button className="duplicate-button" type="button" onClick={duplicateSelected}>
+                    Duplicar elemento
+                  </button>
+                  <button className="delete-button" type="button" onClick={deleteSelected}>
+                    Excluir elemento
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </aside>

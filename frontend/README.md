@@ -26,7 +26,8 @@ npm run build
 - Pincel com ajuste de cor e espessura.
 - Importação local de PNG, JPEG e WebP de até 8 MB.
 - Stickers próprios em SVG.
-- Reordenação de elementos para frente e para trás.
+- Painel de camadas com ordem, visibilidade, bloqueio, duplicação e opacidade.
+- Ajustes não destrutivos de brilho, contraste, saturação, desfoque e preto e branco.
 - Exclusão, desfazer, refazer e exportação PNG.
 
 As funcionalidades desta pasta devem ser desenvolvidas na branch `frontend`.

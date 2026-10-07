@@ -204,6 +204,8 @@
 .properties-panel {
   position: relative;
   min-height: 360px;
+  max-height: calc(100svh - 122px);
+  overflow-y: auto;
   padding: 24px 18px 20px;
   border: 3px solid var(--ink);
   border-radius: 5px;
@@ -223,9 +225,48 @@
 }
 
 .properties-panel h2 {
-  margin: 0 0 23px;
+  margin: 21px 0 18px;
   font-family: var(--display-font);
   font-size: 1.18rem;
+}
+
+.panel-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 4px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  background: #e8e1d5;
+}
+
+.panel-tabs button {
+  padding: 8px 5px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 0.7rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.panel-tabs button.is-active {
+  color: var(--ink);
+  background: var(--yellow);
+  box-shadow: 2px 2px 0 var(--ink);
+}
+
+.panel-tabs span {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  margin-left: 3px;
+  border-radius: 50%;
+  color: #fff;
+  background: var(--ink);
+  font-size: 0.62rem;
 }
 
 .property-group {
@@ -264,6 +305,58 @@
 .property-group input[type='range'] {
   width: 100%;
   accent-color: var(--pink);
+}
+
+.locked-note {
+  margin: 0;
+  padding: 9px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--yellow);
+  font-size: 0.68rem;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.image-adjustments {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 14px 12px;
+  border: 2px dashed rgba(37, 35, 43, 0.56);
+  border-radius: 6px;
+}
+
+.image-adjustments legend {
+  padding-inline: 6px;
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 950;
+  text-transform: uppercase;
+}
+
+.checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-control input {
+  width: 17px;
+  height: 17px;
+  accent-color: var(--pink);
+}
+
+.reset-adjustments {
+  padding: 8px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #fff;
+  font-size: 0.68rem;
+  font-weight: 900;
+  cursor: pointer;
 }
 
 .sticker-picker > p {
@@ -340,6 +433,106 @@
   box-shadow: 3px 3px 0 #8a2032;
 }
 
+.duplicate-button {
+  margin-top: 10px;
+  padding: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--blue);
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.layers-panel {
+  margin-top: 18px;
+}
+
+.layer-list {
+  display: grid;
+  gap: 8px;
+}
+
+.layer-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 30px 30px;
+  align-items: center;
+  gap: 4px;
+  padding: 5px;
+  border: 2px solid rgba(37, 35, 43, 0.3);
+  border-radius: 5px;
+  background: var(--paper);
+}
+
+.layer-item.is-selected {
+  border-color: var(--ink);
+  background: #dff1ff;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.layer-item.is-hidden {
+  opacity: 0.56;
+}
+
+.layer-item.is-background {
+  background: #e7e1d6;
+}
+
+.layer-item.is-background .layer-action {
+  color: var(--ink-soft);
+  cursor: not-allowed;
+}
+
+.layer-select,
+.layer-action {
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+
+.layer-select {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px;
+  text-align: left;
+}
+
+.layer-select > span:last-child {
+  overflow: hidden;
+  font-size: 0.68rem;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-kind {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  background: #fff;
+  font-family: var(--display-font);
+  font-weight: 950;
+}
+
+.layer-action {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  font-size: 0.9rem;
+}
+
+.layer-action:hover {
+  background: var(--yellow);
+}
+
 .empty-properties {
   display: grid;
   place-items: center;
@@ -365,6 +558,7 @@
 .back-button:hover,
 .finish-button:hover,
 .history-bar button:hover:not(:disabled),
+.duplicate-button:hover,
 .delete-button:hover {
   transform: translate(-1px, -1px);
   box-shadow: 5px 5px 0 var(--ink);
