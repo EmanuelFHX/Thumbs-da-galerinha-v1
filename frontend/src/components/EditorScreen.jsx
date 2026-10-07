@@ -28,6 +28,67 @@ const BRUSH_PRESETS = [
   { id: 'marker', label: 'Marcador', size: 16, opacity: 1, softness: 1 },
   { id: 'highlighter', label: 'Marca-texto', size: 30, opacity: 0.35, softness: 0 },
 ]
+const FONT_OPTIONS = [
+  { label: 'Doodle', value: 'Arial Rounded MT Bold, Trebuchet MS' },
+  { label: 'Impacto', value: 'Impact, Haettenschweiler, Arial Narrow Bold' },
+  { label: 'Limpa', value: 'Trebuchet MS, Arial' },
+  { label: 'Editorial', value: 'Georgia, Times New Roman' },
+  { label: 'Mono', value: 'Courier New, monospace' },
+  { label: 'Quadrinhos', value: 'Comic Sans MS, Comic Sans, cursive' },
+]
+const TYPOGRAPHY_PRESETS = [
+  {
+    id: 'doodle',
+    label: 'Doodle',
+    styles: {
+      fontFamily: FONT_OPTIONS[0].value,
+      fontWeight: 'bold',
+      italic: false,
+      fill: '#ff5c7a',
+      stroke: '#25232b',
+      strokeWidth: 3,
+      shadowEnabled: true,
+      shadowColor: '#25232b',
+      shadowBlur: 0,
+      shadowOffsetX: 7,
+      shadowOffsetY: 7,
+      align: 'left',
+    },
+  },
+  {
+    id: 'meme',
+    label: 'Meme',
+    styles: {
+      fontFamily: FONT_OPTIONS[1].value,
+      fontWeight: 'normal',
+      italic: false,
+      fill: '#ffffff',
+      stroke: '#111111',
+      strokeWidth: 6,
+      shadowEnabled: false,
+      align: 'center',
+      letterSpacing: 1,
+    },
+  },
+  {
+    id: 'pop',
+    label: 'Pop',
+    styles: {
+      fontFamily: FONT_OPTIONS[2].value,
+      fontWeight: 'bold',
+      italic: true,
+      fill: '#ffd447',
+      stroke: '#25232b',
+      strokeWidth: 4,
+      shadowEnabled: true,
+      shadowColor: '#ff5c7a',
+      shadowBlur: 0,
+      shadowOffsetX: 8,
+      shadowOffsetY: 8,
+      align: 'center',
+    },
+  },
+]
 
 function getInitialTool() {
   const requestedTool = new URLSearchParams(window.location.search).get('tool')
@@ -159,16 +220,32 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
   let shape = null
 
   if (element.type === 'text') {
+    const fontStyle = [
+      element.fontWeight === 'normal' ? null : 'bold',
+      element.italic ? 'italic' : null,
+    ].filter(Boolean).join(' ') || 'normal'
+
     shape = (
       <Text
         {...sharedProps}
         text={element.text}
         fill={element.fill}
-        fontFamily="Arial Rounded MT Bold, Trebuchet MS"
+        width={element.width ?? 460}
+        fontFamily={element.fontFamily ?? FONT_OPTIONS[0].value}
         fontSize={element.fontSize}
-        fontStyle="bold"
-        lineHeight={1.05}
-        padding={6}
+        fontStyle={fontStyle}
+        textDecoration={element.underline ? 'underline' : ''}
+        align={element.align ?? 'left'}
+        letterSpacing={element.letterSpacing ?? 0}
+        lineHeight={element.lineHeight ?? 1.05}
+        stroke={element.strokeWidth > 0 ? element.stroke : undefined}
+        strokeWidth={element.strokeWidth ?? 0}
+        shadowColor={element.shadowColor ?? '#25232b'}
+        shadowBlur={element.shadowEnabled ? (element.shadowBlur ?? 0) : 0}
+        shadowOffsetX={element.shadowEnabled ? (element.shadowOffsetX ?? 7) : 0}
+        shadowOffsetY={element.shadowEnabled ? (element.shadowOffsetY ?? 7) : 0}
+        shadowOpacity={element.shadowEnabled ? 0.85 : 0}
+        padding={10}
       />
     )
   }
@@ -330,7 +407,22 @@ function EditorScreen({ onBack }) {
       y: 210,
       text: 'Seu texto',
       fontSize: 64,
+      width: 460,
+      fontFamily: FONT_OPTIONS[0].value,
+      fontWeight: 'bold',
+      italic: false,
+      underline: false,
+      align: 'left',
+      letterSpacing: 0,
+      lineHeight: 1.05,
       fill: DEFAULT_COLOR,
+      stroke: '#25232b',
+      strokeWidth: 3,
+      shadowEnabled: true,
+      shadowColor: '#25232b',
+      shadowBlur: 0,
+      shadowOffsetX: 7,
+      shadowOffsetY: 7,
       rotation: -2,
     }
     commit([...elements, nextElement], 'Texto adicionado. Arraste ou redimensione pelas alças.')
@@ -794,6 +886,16 @@ function EditorScreen({ onBack }) {
     setStatus(`Pincel ${preset.label.toLowerCase()} selecionado.`)
   }
 
+  function applyTypographyPreset(preset) {
+    if (!selectedElement || selectedElement.type !== 'text') return
+    commit(
+      elements.map((element) => (
+        element.id === selectedElement.id ? { ...element, ...preset.styles } : element
+      )),
+      `Estilo ${preset.label} aplicado ao texto.`,
+    )
+  }
+
   function sampleCanvasColor(event) {
     const stage = stageRef.current
     const point = event.target.getStage().getPointerPosition()
@@ -930,11 +1032,11 @@ function EditorScreen({ onBack }) {
             onClick={() => setTool('select')}
             title="Selecionar e mover"
           >
-            <span aria-hidden="true">↖</span>
+            <i className="bi bi-cursor-fill" aria-hidden="true" />
             Selecionar
           </ToolButton>
           <ToolButton onClick={addText} title="Adicionar texto">
-            <span aria-hidden="true">T</span>
+            <i className="bi bi-fonts" aria-hidden="true" />
             Texto
           </ToolButton>
           <ToolButton
@@ -946,7 +1048,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Desenhar à mão livre"
           >
-            <span aria-hidden="true">✎</span>
+            <i className="bi bi-brush-fill" aria-hidden="true" />
             Pincel
           </ToolButton>
           <ToolButton
@@ -958,7 +1060,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Apagar conteúdo desenhado"
           >
-            <span aria-hidden="true">⌫</span>
+            <i className="bi bi-eraser-fill" aria-hidden="true" />
             Borracha
           </ToolButton>
           <ToolButton
@@ -971,19 +1073,19 @@ function EditorScreen({ onBack }) {
             }}
             title="Capturar cor do canvas"
           >
-            <span aria-hidden="true">◒</span>
+            <i className="bi bi-eyedropper" aria-hidden="true" />
             Conta-gotas
           </ToolButton>
           <ToolButton onClick={() => addShape('rect')} title="Adicionar retângulo">
-            <span aria-hidden="true">□</span>
+            <i className="bi bi-square" aria-hidden="true" />
             Retângulo
           </ToolButton>
           <ToolButton onClick={() => addShape('circle')} title="Adicionar círculo">
-            <span aria-hidden="true">○</span>
+            <i className="bi bi-circle" aria-hidden="true" />
             Círculo
           </ToolButton>
           <ToolButton onClick={() => fileInputRef.current?.click()} title="Importar imagem">
-            <span aria-hidden="true">▧</span>
+            <i className="bi bi-image" aria-hidden="true" />
             Imagem
           </ToolButton>
           <ToolButton
@@ -994,7 +1096,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Abrir stickers"
           >
-            <span aria-hidden="true">★</span>
+            <i className="bi bi-star-fill" aria-hidden="true" />
             Stickers
           </ToolButton>
           <input
@@ -1334,6 +1436,75 @@ function EditorScreen({ onBack }) {
                         value={selectedElement.text}
                         onChange={(event) => updateSelected({ text: event.target.value })}
                       />
+
+                      <div className="typography-presets" aria-label="Estilos rápidos de texto">
+                        {TYPOGRAPHY_PRESETS.map((preset) => (
+                          <button key={preset.id} type="button" onClick={() => applyTypographyPreset(preset)}>
+                            <span aria-hidden="true">Aa</span>
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <label htmlFor="font-family">Fonte</label>
+                      <select
+                        id="font-family"
+                        value={selectedElement.fontFamily ?? FONT_OPTIONS[0].value}
+                        onChange={(event) => updateSelected({ fontFamily: event.target.value })}
+                      >
+                        {FONT_OPTIONS.map((font) => (
+                          <option key={font.label} value={font.value}>{font.label}</option>
+                        ))}
+                      </select>
+
+                      <div className="text-style-grid" aria-label="Estilo da fonte">
+                        <button
+                          className={selectedElement.fontWeight !== 'normal' ? 'is-active' : ''}
+                          type="button"
+                          onClick={() => updateSelected({
+                            fontWeight: selectedElement.fontWeight === 'normal' ? 'bold' : 'normal',
+                          })}
+                          title="Negrito"
+                        >
+                          <strong>B</strong>
+                        </button>
+                        <button
+                          className={selectedElement.italic ? 'is-active' : ''}
+                          type="button"
+                          onClick={() => updateSelected({ italic: !selectedElement.italic })}
+                          title="Itálico"
+                        >
+                          <em>I</em>
+                        </button>
+                        <button
+                          className={selectedElement.underline ? 'is-active' : ''}
+                          type="button"
+                          onClick={() => updateSelected({ underline: !selectedElement.underline })}
+                          title="Sublinhado"
+                        >
+                          <u>U</u>
+                        </button>
+                      </div>
+
+                      <div className="text-alignment" aria-label="Alinhamento do texto">
+                        {[
+                          ['left', 'Esquerda', '≡'],
+                          ['center', 'Centro', '≣'],
+                          ['right', 'Direita', '≡'],
+                        ].map(([value, label, icon]) => (
+                          <button
+                            key={value}
+                            className={(selectedElement.align ?? 'left') === value ? 'is-active' : ''}
+                            type="button"
+                            onClick={() => updateSelected({ align: value })}
+                            title={`Alinhar à ${label.toLowerCase()}`}
+                          >
+                            <span className={`align-icon align-${value}`} aria-hidden="true">{icon}</span>
+                            <span className="visually-hidden">{label}</span>
+                          </button>
+                        ))}
+                      </div>
+
                       <label htmlFor="font-size">Tamanho: {selectedElement.fontSize}px</label>
                       <input
                         id="font-size"
@@ -1343,10 +1514,126 @@ function EditorScreen({ onBack }) {
                         value={selectedElement.fontSize}
                         onChange={(event) => updateSelected({ fontSize: Number(event.target.value) })}
                       />
+
+                      <label htmlFor="text-width">Largura: {selectedElement.width ?? 460}px</label>
+                      <input
+                        id="text-width"
+                        type="range"
+                        min="160"
+                        max="820"
+                        value={selectedElement.width ?? 460}
+                        onChange={(event) => updateSelected({ width: Number(event.target.value) })}
+                      />
+
+                      <label htmlFor="letter-spacing">
+                        Espaçamento: {selectedElement.letterSpacing ?? 0}px
+                      </label>
+                      <input
+                        id="letter-spacing"
+                        type="range"
+                        min="-4"
+                        max="24"
+                        value={selectedElement.letterSpacing ?? 0}
+                        onChange={(event) => updateSelected({ letterSpacing: Number(event.target.value) })}
+                      />
+
+                      <label htmlFor="line-height">
+                        Entrelinhas: {(selectedElement.lineHeight ?? 1.05).toFixed(2)}
+                      </label>
+                      <input
+                        id="line-height"
+                        type="range"
+                        min="0.8"
+                        max="2"
+                        step="0.05"
+                        value={selectedElement.lineHeight ?? 1.05}
+                        onChange={(event) => updateSelected({ lineHeight: Number(event.target.value) })}
+                      />
+
+                      <div className="color-pair">
+                        <label htmlFor="text-color">
+                          Cor
+                          <input
+                            id="text-color"
+                            type="color"
+                            value={selectedElement.fill}
+                            onChange={(event) => updateSelected({ fill: event.target.value })}
+                          />
+                        </label>
+                        <label htmlFor="text-stroke-color">
+                          Contorno
+                          <input
+                            id="text-stroke-color"
+                            type="color"
+                            value={selectedElement.stroke ?? '#25232b'}
+                            onChange={(event) => updateSelected({ stroke: event.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      <label htmlFor="text-stroke-width">
+                        Espessura do contorno: {selectedElement.strokeWidth ?? 0}px
+                      </label>
+                      <input
+                        id="text-stroke-width"
+                        type="range"
+                        min="0"
+                        max="12"
+                        value={selectedElement.strokeWidth ?? 0}
+                        onChange={(event) => updateSelected({ strokeWidth: Number(event.target.value) })}
+                      />
+
+                      <label className="checkbox-control">
+                        <input
+                          type="checkbox"
+                          checked={selectedElement.shadowEnabled ?? false}
+                          onChange={(event) => updateSelected({ shadowEnabled: event.target.checked })}
+                        />
+                        Sombra do texto
+                      </label>
+
+                      {selectedElement.shadowEnabled && (
+                        <div className="shadow-controls">
+                          <label htmlFor="text-shadow-color">
+                            Cor da sombra
+                            <input
+                              id="text-shadow-color"
+                              type="color"
+                              value={selectedElement.shadowColor ?? '#25232b'}
+                              onChange={(event) => updateSelected({ shadowColor: event.target.value })}
+                            />
+                          </label>
+                          <label htmlFor="text-shadow-blur">
+                            Desfoque: {selectedElement.shadowBlur ?? 0}px
+                          </label>
+                          <input
+                            id="text-shadow-blur"
+                            type="range"
+                            min="0"
+                            max="24"
+                            value={selectedElement.shadowBlur ?? 0}
+                            onChange={(event) => updateSelected({ shadowBlur: Number(event.target.value) })}
+                          />
+                          <label htmlFor="text-shadow-distance">
+                            Distância: {selectedElement.shadowOffsetX ?? 7}px
+                          </label>
+                          <input
+                            id="text-shadow-distance"
+                            type="range"
+                            min="-20"
+                            max="24"
+                            value={selectedElement.shadowOffsetX ?? 7}
+                            onChange={(event) => {
+                              const distance = Number(event.target.value)
+                              updateSelected({ shadowOffsetX: distance, shadowOffsetY: distance })
+                            }}
+                          />
+                        </div>
+                      )}
                     </>
                   )}
 
-                  {selectedElement.type !== 'image' && selectedElement.type !== 'line' && (
+                  {selectedElement.type !== 'image' && selectedElement.type !== 'line' && selectedElement.type !== 'text' && (
                     <>
                       <label htmlFor="element-color">Cor</label>
                       <input
