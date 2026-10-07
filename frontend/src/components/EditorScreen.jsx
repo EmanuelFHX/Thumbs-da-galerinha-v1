@@ -23,10 +23,16 @@ const STICKERS = [
   { name: 'Balão', source: '/stickers/speech.svg' },
   { name: 'Fogo', source: '/stickers/fire.svg' },
 ]
+const BRUSH_PRESETS = [
+  { id: 'pencil', label: 'Lápis', size: 4, opacity: 1, softness: 0 },
+  { id: 'marker', label: 'Marcador', size: 16, opacity: 1, softness: 1 },
+  { id: 'highlighter', label: 'Marca-texto', size: 30, opacity: 0.35, softness: 0 },
+]
 
 function getInitialTool() {
-  return new URLSearchParams(window.location.search).get('tool') === 'stickers'
-    ? 'stickers'
+  const requestedTool = new URLSearchParams(window.location.search).get('tool')
+  return ['brush', 'eraser', 'eyedropper', 'stickers'].includes(requestedTool)
+    ? requestedTool
     : 'select'
 }
 
@@ -272,7 +278,9 @@ function ToolButton({ active = false, children, onClick, title }) {
 function getLayerLabel(element, index) {
   if (element.type === 'text') return element.text || 'Texto vazio'
   if (element.type === 'image') return element.source.startsWith('/stickers/') ? 'Sticker' : 'Imagem'
-  if (element.type === 'line') return `Traço ${index + 1}`
+  if (element.type === 'line') {
+    return element.mode === 'eraser' ? `Borracha ${index + 1}` : `Traço ${index + 1}`
+  }
   if (element.type === 'circle') return 'Círculo'
   return 'Retângulo'
 }
@@ -292,6 +300,9 @@ function EditorScreen({ onBack }) {
   const [sidePanel, setSidePanel] = useState(getInitialSidePanel)
   const [brushColor, setBrushColor] = useState('#ff5c7a')
   const [brushSize, setBrushSize] = useState(10)
+  const [brushOpacity, setBrushOpacity] = useState(1)
+  const [brushSoftness, setBrushSoftness] = useState(0)
+  const [eraserSize, setEraserSize] = useState(34)
   const [selectedId, setSelectedId] = useState(null)
   const [elements, setElements] = useState([])
   const [past, setPast] = useState([])
@@ -695,6 +706,25 @@ function EditorScreen({ onBack }) {
       const actions = shortcutActions.current
       if (!actions) return
 
+      if (!hasModifier && event.key.toLowerCase() === 'b') {
+        setTool('brush')
+        setSelectedId(null)
+        setSidePanel('properties')
+        setStatus('Pincel selecionado.')
+      }
+      if (!hasModifier && event.key.toLowerCase() === 'e') {
+        setTool('eraser')
+        setSelectedId(null)
+        setSidePanel('properties')
+        setStatus('Borracha selecionada.')
+      }
+      if (!hasModifier && event.key.toLowerCase() === 'i') {
+        setTool('eyedropper')
+        setSelectedId(null)
+        setSidePanel('properties')
+        setStatus('Clique em uma cor do canvas para capturá-la.')
+      }
+
       if (hasModifier && event.key.toLowerCase() === 'z') {
         event.preventDefault()
         if (event.shiftKey) actions.redo()
@@ -757,10 +787,63 @@ function EditorScreen({ onBack }) {
     setStatus('Ação refeita.')
   }
 
+  function applyBrushPreset(preset) {
+    setBrushSize(preset.size)
+    setBrushOpacity(preset.opacity)
+    setBrushSoftness(preset.softness)
+    setStatus(`Pincel ${preset.label.toLowerCase()} selecionado.`)
+  }
+
+  function sampleCanvasColor(event) {
+    const stage = stageRef.current
+    const point = event.target.getStage().getPointerPosition()
+    const transformers = stage.find('Transformer')
+    transformers.forEach((transformer) => transformer.visible(false))
+    stage.batchDraw()
+
+    let pixel
+    try {
+      const sample = stage.toCanvas({
+        x: Math.floor(point.x),
+        y: Math.floor(point.y),
+        width: 1,
+        height: 1,
+        pixelRatio: 1,
+      })
+      pixel = sample.getContext('2d').getImageData(0, 0, 1, 1).data
+    } catch {
+      setStatus('Não foi possível capturar essa cor. Tente outro ponto do canvas.')
+      return
+    } finally {
+      transformers.forEach((transformer) => transformer.visible(true))
+      stage.batchDraw()
+    }
+
+    const [red, green, blue, alpha] = pixel
+
+    if (alpha === 0) {
+      setStatus('Essa área é transparente. Escolha outra cor no canvas.')
+      return
+    }
+
+    const color = `#${[red, green, blue]
+      .map((channel) => channel.toString(16).padStart(2, '0'))
+      .join('')}`
+    setBrushColor(color)
+    setTool('brush')
+    setSidePanel('properties')
+    setStatus(`Cor ${color.toUpperCase()} capturada pelo conta-gotas.`)
+  }
+
   function beginDrawing(event) {
     if (isSpacePressed.current) return
 
-    if (tool !== 'brush') {
+    if (tool === 'eyedropper') {
+      sampleCanvasColor(event)
+      return
+    }
+
+    if (tool !== 'brush' && tool !== 'eraser') {
       if (event.target === event.target.getStage()) setSelectedId(null)
       return
     }
@@ -773,15 +856,18 @@ function EditorScreen({ onBack }) {
       id: createId('line'),
       type: 'line',
       points: [point.x, point.y, point.x, point.y],
-      stroke: brushColor,
-      strokeWidth: brushSize,
+      mode: tool,
+      stroke: tool === 'eraser' ? '#000000' : brushColor,
+      strokeWidth: tool === 'eraser' ? eraserSize : brushSize,
+      opacity: tool === 'eraser' ? 1 : brushOpacity,
+      softness: tool === 'eraser' ? 0 : brushSoftness,
     }
     setElements([...elements, nextLine])
     setSelectedId(null)
   }
 
   function continueDrawing(event) {
-    if (!isDrawing.current || tool !== 'brush') return
+    if (!isDrawing.current || (tool !== 'brush' && tool !== 'eraser')) return
     event.evt.preventDefault()
     const point = event.target.getStage().getPointerPosition()
 
@@ -801,7 +887,7 @@ function EditorScreen({ onBack }) {
     isDrawing.current = false
     setPast((current) => [...current, drawingStart.current])
     setFuture([])
-    setStatus('Traço adicionado.')
+    setStatus(tool === 'eraser' ? 'Área apagada.' : 'Traço adicionado.')
   }
 
   function exportImage() {
@@ -853,11 +939,40 @@ function EditorScreen({ onBack }) {
           </ToolButton>
           <ToolButton
             active={tool === 'brush'}
-            onClick={() => setTool('brush')}
+            onClick={() => {
+              setTool('brush')
+              setSelectedId(null)
+              setSidePanel('properties')
+            }}
             title="Desenhar à mão livre"
           >
             <span aria-hidden="true">✎</span>
             Pincel
+          </ToolButton>
+          <ToolButton
+            active={tool === 'eraser'}
+            onClick={() => {
+              setTool('eraser')
+              setSelectedId(null)
+              setSidePanel('properties')
+            }}
+            title="Apagar conteúdo desenhado"
+          >
+            <span aria-hidden="true">⌫</span>
+            Borracha
+          </ToolButton>
+          <ToolButton
+            active={tool === 'eyedropper'}
+            onClick={() => {
+              setTool('eyedropper')
+              setSelectedId(null)
+              setSidePanel('properties')
+              setStatus('Clique em uma cor do canvas para capturá-la.')
+            }}
+            title="Capturar cor do canvas"
+          >
+            <span aria-hidden="true">◒</span>
+            Conta-gotas
           </ToolButton>
           <ToolButton onClick={() => addShape('rect')} title="Adicionar retângulo">
             <span aria-hidden="true">□</span>
@@ -915,7 +1030,7 @@ function EditorScreen({ onBack }) {
 
           <div
             ref={canvasFrameRef}
-            className={`canvas-frame${tool === 'brush' ? ' is-drawing' : ''}${spaceDown ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}`}
+            className={`canvas-frame${tool === 'brush' || tool === 'eraser' ? ' is-drawing' : ''}${tool === 'eyedropper' ? ' is-eyedropper' : ''}${spaceDown ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}`}
             onWheel={handleCanvasWheel}
             onPointerDown={startPan}
             onPointerMove={continuePan}
@@ -945,7 +1060,7 @@ function EditorScreen({ onBack }) {
                   onTouchMove={continueDrawing}
                   onTouchEnd={finishDrawing}
                 >
-                  <Layer>
+                  <Layer listening={false}>
                     <Rect width={CANVAS_WIDTH} height={CANVAS_HEIGHT} fill="#dcefff" listening={false} />
                     {baseImage && (
                       <KonvaImage
@@ -955,7 +1070,9 @@ function EditorScreen({ onBack }) {
                         listening={false}
                       />
                     )}
+                  </Layer>
 
+                  <Layer>
                     {elements.map((element) => {
                       if (element.visible === false) return null
 
@@ -967,9 +1084,13 @@ function EditorScreen({ onBack }) {
                             stroke={element.stroke}
                             strokeWidth={element.strokeWidth}
                             opacity={element.opacity ?? 1}
+                            shadowColor={element.stroke}
+                            shadowBlur={element.softness ?? 0}
+                            shadowOpacity={element.mode === 'eraser' ? 0 : (element.opacity ?? 1) * 0.65}
                             tension={0.35}
                             lineCap="round"
                             lineJoin="round"
+                            globalCompositeOperation={element.mode === 'eraser' ? 'destination-out' : 'source-over'}
                             listening={false}
                           />
                         )
@@ -1100,24 +1221,75 @@ function EditorScreen({ onBack }) {
             <div role="tabpanel">
               <h2>Propriedades</h2>
 
-              {tool === 'brush' && (
+              {(tool === 'brush' || tool === 'eraser') && (
                 <div className="property-group">
-                  <label htmlFor="brush-color">Cor do pincel</label>
+                  <h3>{tool === 'eraser' ? 'Borracha' : 'Pincel'}</h3>
+
+                  {tool === 'brush' && (
+                    <>
+                      <div className="brush-presets" aria-label="Predefinições do pincel">
+                        {BRUSH_PRESETS.map((preset) => (
+                          <button key={preset.id} type="button" onClick={() => applyBrushPreset(preset)}>
+                            {preset.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <label htmlFor="brush-color">Cor do pincel</label>
+                      <input
+                        id="brush-color"
+                        type="color"
+                        value={brushColor}
+                        onChange={(event) => setBrushColor(event.target.value)}
+                      />
+
+                      <label htmlFor="brush-opacity">Opacidade: {Math.round(brushOpacity * 100)}%</label>
+                      <input
+                        id="brush-opacity"
+                        type="range"
+                        min="0.1"
+                        max="1"
+                        step="0.05"
+                        value={brushOpacity}
+                        onChange={(event) => setBrushOpacity(Number(event.target.value))}
+                      />
+
+                      <label htmlFor="brush-softness">Suavidade: {brushSoftness}px</label>
+                      <input
+                        id="brush-softness"
+                        type="range"
+                        min="0"
+                        max="18"
+                        value={brushSoftness}
+                        onChange={(event) => setBrushSoftness(Number(event.target.value))}
+                      />
+                    </>
+                  )}
+
+                  <label htmlFor="tool-size">
+                    Espessura: {tool === 'eraser' ? eraserSize : brushSize}px
+                  </label>
                   <input
-                    id="brush-color"
-                    type="color"
-                    value={brushColor}
-                    onChange={(event) => setBrushColor(event.target.value)}
-                  />
-                  <label htmlFor="brush-size">Espessura: {brushSize}px</label>
-                  <input
-                    id="brush-size"
+                    id="tool-size"
                     type="range"
-                    min="3"
-                    max="32"
-                    value={brushSize}
-                    onChange={(event) => setBrushSize(Number(event.target.value))}
+                    min={tool === 'eraser' ? 8 : 1}
+                    max={tool === 'eraser' ? 100 : 64}
+                    value={tool === 'eraser' ? eraserSize : brushSize}
+                    onChange={(event) => {
+                      const size = Number(event.target.value)
+                      if (tool === 'eraser') setEraserSize(size)
+                      else setBrushSize(size)
+                    }}
                   />
+                </div>
+              )}
+
+              {tool === 'eyedropper' && (
+                <div className="tool-hint">
+                  <span aria-hidden="true">◒</span>
+                  <h3>Conta-gotas</h3>
+                  <p>Clique em qualquer ponto do canvas para usar aquela cor no pincel.</p>
+                  <strong style={{ color: brushColor }}>{brushColor.toUpperCase()}</strong>
                 </div>
               )}
 
@@ -1140,7 +1312,7 @@ function EditorScreen({ onBack }) {
                 </div>
               )}
 
-              {tool !== 'brush' && tool !== 'stickers' && !selectedElement && (
+              {!['brush', 'eraser', 'eyedropper', 'stickers'].includes(tool) && !selectedElement && (
                 <div className="empty-properties">
                   <span aria-hidden="true">↖</span>
                   <p>Selecione um elemento ou abra a aba de camadas.</p>
@@ -1186,7 +1358,7 @@ function EditorScreen({ onBack }) {
                     </>
                   )}
 
-                  {selectedElement.type === 'line' && (
+                  {selectedElement.type === 'line' && selectedElement.mode !== 'eraser' && (
                     <>
                       <label htmlFor="line-color">Cor do traço</label>
                       <input
