@@ -8,7 +8,8 @@ Atualizado em: 2026-10-06
 | --- | --- |
 | Plataforma | Aplicação web executada no navegador |
 | Linguagem | JavaScript |
-| Frontend | JavaScript e APIs compatíveis com navegadores modernos |
+| Frontend | React com JavaScript |
+| Build e desenvolvimento | Vite |
 | Backend | Ecossistema JavaScript, com Node.js como runtime planejado |
 | Organização Git | Trabalho de frontend na branch `frontend`; backend na branch `backend` |
 
@@ -23,7 +24,6 @@ Atualizado em: 2026-10-06
 
 ## Decisões ainda abertas
 
-- JavaScript puro ou framework de interface.
 - Biblioteca responsável pelo canvas e manipulação dos elementos.
 - Framework HTTP do backend.
 - Tecnologia de comunicação em tempo real.
