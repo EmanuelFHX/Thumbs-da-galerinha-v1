@@ -20,4 +20,13 @@ npm run build
 - `public/favicon-game.svg`: ícone inicial do projeto.
 - `public/sample-base.svg`: imagem-base local usada no protótipo.
 
+## Editor implementado
+
+- Texto, retângulo e círculo com seleção e transformação.
+- Pincel com ajuste de cor e espessura.
+- Importação local de PNG, JPEG e WebP de até 8 MB.
+- Stickers próprios em SVG.
+- Reordenação de elementos para frente e para trás.
+- Exclusão, desfazer, refazer e exportação PNG.
+
 As funcionalidades desta pasta devem ser desenvolvidas na branch `frontend`.

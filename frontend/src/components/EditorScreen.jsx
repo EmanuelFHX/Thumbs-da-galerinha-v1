@@ -14,6 +14,18 @@ import './editor.css'
 const CANVAS_WIDTH = 960
 const CANVAS_HEIGHT = 540
 const DEFAULT_COLOR = '#ff5c7a'
+const MAX_IMAGE_SIZE = 8 * 1024 * 1024
+const STICKERS = [
+  { name: 'Estrela', source: '/stickers/star.svg' },
+  { name: 'Balão', source: '/stickers/speech.svg' },
+  { name: 'Fogo', source: '/stickers/fire.svg' },
+]
+
+function getInitialTool() {
+  return new URLSearchParams(window.location.search).get('tool') === 'stickers'
+    ? 'stickers'
+    : 'select'
+}
 
 function createId(prefix) {
   return `${prefix}-${crypto.randomUUID()}`
@@ -23,6 +35,10 @@ function useCanvasImage(source) {
   const [image, setImage] = useState(null)
 
   useEffect(() => {
+    if (!source) {
+      return undefined
+    }
+
     const nextImage = new window.Image()
     nextImage.src = source
     nextImage.onload = () => setImage(nextImage)
@@ -38,12 +54,13 @@ function useCanvasImage(source) {
 function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }) {
   const nodeRef = useRef(null)
   const transformerRef = useRef(null)
+  const elementImage = useCanvasImage(element.type === 'image' ? element.source : null)
 
   useEffect(() => {
     if (!isSelected || !transformerRef.current || !nodeRef.current) return
     transformerRef.current.nodes([nodeRef.current])
     transformerRef.current.getLayer().batchDraw()
-  }, [isSelected])
+  }, [elementImage, isSelected])
 
   const sharedProps = {
     ref: nodeRef,
@@ -125,6 +142,20 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
     )
   }
 
+  if (element.type === 'image' && elementImage) {
+    shape = (
+      <KonvaImage
+        {...sharedProps}
+        image={elementImage}
+        width={element.width}
+        height={element.height}
+        shadowColor="#25232b"
+        shadowOffset={{ x: 7, y: 7 }}
+        shadowOpacity={0.48}
+      />
+    )
+  }
+
   return (
     <>
       {shape}
@@ -166,11 +197,12 @@ function ToolButton({ active = false, children, onClick, title }) {
 
 function EditorScreen({ onBack }) {
   const stageRef = useRef(null)
+  const fileInputRef = useRef(null)
   const isDrawing = useRef(false)
   const drawingStart = useRef([])
   const baseImage = useCanvasImage('/sample-base.svg')
 
-  const [tool, setTool] = useState('select')
+  const [tool, setTool] = useState(getInitialTool)
   const [brushColor, setBrushColor] = useState('#ff5c7a')
   const [brushSize, setBrushSize] = useState(10)
   const [selectedId, setSelectedId] = useState(null)
@@ -230,6 +262,61 @@ function EditorScreen({ onBack }) {
     setTool('select')
   }
 
+  function addImage(source, width, height, message) {
+    const maxWidth = 360
+    const maxHeight = 260
+    const scale = Math.min(maxWidth / width, maxHeight / height, 1)
+    const nextWidth = Math.round(width * scale)
+    const nextHeight = Math.round(height * scale)
+    const nextElement = {
+      id: createId('image'),
+      type: 'image',
+      source,
+      x: Math.round((CANVAS_WIDTH - nextWidth) / 2),
+      y: Math.round((CANVAS_HEIGHT - nextHeight) / 2),
+      width: nextWidth,
+      height: nextHeight,
+    }
+
+    commit([...elements, nextElement], message)
+    setSelectedId(nextElement.id)
+    setTool('select')
+  }
+
+  function addSticker(sticker) {
+    addImage(sticker.source, 180, 180, `${sticker.name} adicionado ao canvas.`)
+  }
+
+  function handleImageUpload(event) {
+    const [file] = event.target.files
+    event.target.value = ''
+
+    if (!file) return
+
+    const supportedTypes = ['image/jpeg', 'image/png', 'image/webp']
+    if (!supportedTypes.includes(file.type)) {
+      setStatus('Use uma imagem PNG, JPEG ou WebP.')
+      return
+    }
+
+    if (file.size > MAX_IMAGE_SIZE) {
+      setStatus('A imagem deve ter no máximo 8 MB.')
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onerror = () => setStatus('Não foi possível ler essa imagem.')
+    reader.onload = () => {
+      const image = new window.Image()
+      image.onerror = () => setStatus('O arquivo não pôde ser aberto como imagem.')
+      image.onload = () => {
+        addImage(reader.result, image.naturalWidth, image.naturalHeight, 'Imagem adicionada ao canvas.')
+      }
+      image.src = reader.result
+    }
+    reader.readAsDataURL(file)
+  }
+
   function updateElement(updatedElement) {
     commit(
       elements.map((element) => (
@@ -251,6 +338,18 @@ function EditorScreen({ onBack }) {
       'Elemento excluído.',
     )
     setSelectedId(null)
+  }
+
+  function moveSelected(direction) {
+    const currentIndex = elements.findIndex((element) => element.id === selectedId)
+    const nextIndex = currentIndex + direction
+
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= elements.length) return
+
+    const reordered = [...elements]
+    const [movedElement] = reordered.splice(currentIndex, 1)
+    reordered.splice(nextIndex, 0, movedElement)
+    commit(reordered, direction > 0 ? 'Elemento movido para frente.' : 'Elemento movido para trás.')
   }
 
   function undo() {
@@ -381,6 +480,29 @@ function EditorScreen({ onBack }) {
             <span aria-hidden="true">○</span>
             Círculo
           </ToolButton>
+          <ToolButton onClick={() => fileInputRef.current?.click()} title="Importar imagem">
+            <span aria-hidden="true">▧</span>
+            Imagem
+          </ToolButton>
+          <ToolButton
+            active={tool === 'stickers'}
+            onClick={() => {
+              setTool('stickers')
+              setSelectedId(null)
+            }}
+            title="Abrir stickers"
+          >
+            <span aria-hidden="true">★</span>
+            Stickers
+          </ToolButton>
+          <input
+            ref={fileInputRef}
+            className="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            onChange={handleImageUpload}
+            tabIndex={-1}
+          />
         </aside>
 
         <section className="canvas-column" aria-label="Área de edição">
@@ -477,7 +599,26 @@ function EditorScreen({ onBack }) {
             </div>
           )}
 
-          {tool !== 'brush' && !selectedElement && (
+          {tool === 'stickers' && (
+            <div className="sticker-picker">
+              <p>Escolha um sticker</p>
+              <div className="sticker-grid">
+                {STICKERS.map((sticker) => (
+                  <button
+                    key={sticker.source}
+                    type="button"
+                    onClick={() => addSticker(sticker)}
+                    aria-label={`Adicionar sticker ${sticker.name}`}
+                  >
+                    <img src={sticker.source} alt="" />
+                    <span>{sticker.name}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tool !== 'brush' && tool !== 'stickers' && !selectedElement && (
             <div className="empty-properties">
               <span aria-hidden="true">↖</span>
               <p>Selecione um texto ou forma no canvas para editar.</p>
@@ -507,13 +648,34 @@ function EditorScreen({ onBack }) {
                 </>
               )}
 
-              <label htmlFor="element-color">Cor</label>
-              <input
-                id="element-color"
-                type="color"
-                value={selectedElement.fill}
-                onChange={(event) => updateSelected({ fill: event.target.value })}
-              />
+              {selectedElement.type !== 'image' && (
+                <>
+                  <label htmlFor="element-color">Cor</label>
+                  <input
+                    id="element-color"
+                    type="color"
+                    value={selectedElement.fill}
+                    onChange={(event) => updateSelected({ fill: event.target.value })}
+                  />
+                </>
+              )}
+
+              <div className="layer-buttons" aria-label="Ordem da camada">
+                <button
+                  type="button"
+                  onClick={() => moveSelected(-1)}
+                  disabled={elements.findIndex((element) => element.id === selectedId) <= 0}
+                >
+                  ↓ Para trás
+                </button>
+                <button
+                  type="button"
+                  onClick={() => moveSelected(1)}
+                  disabled={elements.findIndex((element) => element.id === selectedId) === elements.length - 1}
+                >
+                  ↑ Para frente
+                </button>
+              </div>
 
               <button className="delete-button" type="button" onClick={deleteSelected}>
                 Excluir elemento

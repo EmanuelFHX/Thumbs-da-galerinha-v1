@@ -130,6 +130,16 @@
   transform: rotate(-1deg);
 }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
 .canvas-column {
   min-width: 0;
 }
@@ -254,6 +264,72 @@
 .property-group input[type='range'] {
   width: 100%;
   accent-color: var(--pink);
+}
+
+.sticker-picker > p {
+  margin: 0 0 13px;
+  color: var(--ink-soft);
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.sticker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sticker-grid button {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  min-height: 92px;
+  padding: 8px 5px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 0.66rem;
+  font-weight: 900;
+  cursor: pointer;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.sticker-grid button:hover {
+  transform: translate(-1px, -1px) rotate(-1deg);
+  box-shadow: 5px 5px 0 var(--ink);
+}
+
+.sticker-grid img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+}
+
+.layer-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.layer-buttons button {
+  min-height: 44px;
+  padding: 7px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: var(--yellow);
+  font-size: 0.68rem;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.layer-buttons button:disabled {
+  color: #888287;
+  background: #ded8cc;
+  cursor: not-allowed;
+  opacity: 0.72;
 }
 
 .delete-button {
