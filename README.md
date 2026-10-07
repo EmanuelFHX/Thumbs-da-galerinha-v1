@@ -32,3 +32,4 @@ docs/      Regras, experiência e decisões compartilhadas
 - [Direção visual](docs/design-direction.md)
 - [Fluxo e wireframes](docs/flow-and-wireframes.md)
 - [Decisões técnicas](docs/technical-stack.md)
+- [Escopo do editor](docs/editor-scope.md)

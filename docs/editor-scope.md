@@ -1,0 +1,77 @@
+# Escopo do editor — núcleo inspirado no Photoshop
+
+Atualizado em: 2026-10-06
+
+O editor deve oferecer as ferramentas fundamentais de composição e tratamento de
+imagem sem tentar reproduzir todo o Photoshop. A prioridade é permitir criações
+rápidas durante uma rodada competitiva.
+
+## Núcleo obrigatório
+
+### Documento e navegação
+
+- Canvas com imagem-base.
+- Zoom, pan e ajuste à tela.
+- Recorte e redimensionamento do documento.
+- Guias simples e encaixe em centro/bordas.
+
+### Camadas
+
+- Selecionar, renomear e reordenar.
+- Mostrar, ocultar, bloquear, duplicar e excluir.
+- Ajustar opacidade.
+- Modos de mesclagem essenciais.
+
+### Transformação
+
+- Mover, redimensionar e rotacionar.
+- Virar horizontal e verticalmente.
+- Manter proporção quando necessário.
+
+### Conteúdo
+
+- Importar PNG, JPEG e WebP.
+- Texto com família, tamanho, peso, alinhamento, cor e contorno.
+- Formas básicas e stickers.
+- Pincel, borracha e conta-gotas.
+
+### Ajustes e filtros
+
+- Brilho, contraste e saturação.
+- Desfoque e preto e branco.
+- Matiz, temperatura e nitidez em uma etapa posterior.
+
+### Segurança e saída
+
+- Desfazer e refazer.
+- Salvamento temporário no navegador durante a rodada.
+- Exportação PNG/JPEG.
+- Confirmação antes de abandonar alterações não enviadas.
+
+## Implementado
+
+- Imagem-base e importação local.
+- Texto, formas e stickers.
+- Seleção, movimento, escala e rotação.
+- Pincel.
+- Camadas com ordem, visibilidade, bloqueio, duplicação, exclusão e opacidade.
+- Brilho, contraste, saturação, desfoque e preto e branco por imagem.
+- Desfazer, refazer e exportação PNG.
+
+## Próximas entregas
+
+1. Zoom, pan, encaixe e atalhos de teclado.
+2. Recorte, flip horizontal/vertical e tamanho do documento.
+3. Borracha, conta-gotas e melhorias do pincel.
+4. Tipografia avançada e estilos de texto.
+5. Salvamento automático e restauração de sessão.
+
+## Fora do primeiro MVP
+
+- Arquivos PSD.
+- Smart Objects.
+- Curvas e níveis profissionais.
+- Canais, edição CMYK e gerenciamento de cor avançado.
+- Seleção inteligente por IA.
+- Plugins compatíveis com Photoshop.
+
