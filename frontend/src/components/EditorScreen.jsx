@@ -10,10 +10,17 @@ import {
   Text,
   Transformer,
 } from 'react-konva'
+import {
+  clearEditorSession,
+  loadEditorSession,
+  saveEditorSession,
+} from '../lib/editorSession.js'
 import './editor.css'
 
-const CANVAS_WIDTH = 960
-const CANVAS_HEIGHT = 540
+const DEFAULT_DOCUMENT_SIZE = { width: 960, height: 540 }
+const MIN_DOCUMENT_WIDTH = 320
+const MIN_DOCUMENT_HEIGHT = 180
+const MAX_DOCUMENT_SIZE = 1920
 const DEFAULT_COLOR = '#ff5c7a'
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024
 const MIN_ZOOM = 0.25
@@ -89,6 +96,12 @@ const TYPOGRAPHY_PRESETS = [
     },
   },
 ]
+const DOCUMENT_PRESETS = [
+  { id: 'landscape', label: 'YouTube', detail: '1280 × 720', width: 1280, height: 720 },
+  { id: 'square', label: 'Quadrado', detail: '1080 × 1080', width: 1080, height: 1080 },
+  { id: 'portrait', label: 'Retrato', detail: '1080 × 1350', width: 1080, height: 1350 },
+  { id: 'story', label: 'Stories', detail: '1080 × 1920', width: 1080, height: 1920 },
+]
 
 function getInitialTool() {
   const requestedTool = new URLSearchParams(window.location.search).get('tool')
@@ -98,9 +111,8 @@ function getInitialTool() {
 }
 
 function getInitialSidePanel() {
-  return new URLSearchParams(window.location.search).get('panel') === 'layers'
-    ? 'layers'
-    : 'properties'
+  const requestedPanel = new URLSearchParams(window.location.search).get('panel')
+  return ['document', 'layers'].includes(requestedPanel) ? requestedPanel : 'properties'
 }
 
 function createId(prefix) {
@@ -111,7 +123,7 @@ function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum)
 }
 
-function getSnappedPosition(node) {
+function getSnappedPosition(node, documentSize) {
   const threshold = 10
   const bounds = node.getClientRect({ skipShadow: true })
   const nextPosition = { x: node.x(), y: node.y() }
@@ -119,21 +131,48 @@ function getSnappedPosition(node) {
   const verticalCenter = bounds.y + bounds.height / 2
 
   if (Math.abs(bounds.x) <= threshold) nextPosition.x -= bounds.x
-  if (Math.abs(bounds.x + bounds.width - CANVAS_WIDTH) <= threshold) {
-    nextPosition.x += CANVAS_WIDTH - bounds.x - bounds.width
+  if (Math.abs(bounds.x + bounds.width - documentSize.width) <= threshold) {
+    nextPosition.x += documentSize.width - bounds.x - bounds.width
   }
-  if (Math.abs(horizontalCenter - CANVAS_WIDTH / 2) <= threshold) {
-    nextPosition.x += CANVAS_WIDTH / 2 - horizontalCenter
+  if (Math.abs(horizontalCenter - documentSize.width / 2) <= threshold) {
+    nextPosition.x += documentSize.width / 2 - horizontalCenter
   }
   if (Math.abs(bounds.y) <= threshold) nextPosition.y -= bounds.y
-  if (Math.abs(bounds.y + bounds.height - CANVAS_HEIGHT) <= threshold) {
-    nextPosition.y += CANVAS_HEIGHT - bounds.y - bounds.height
+  if (Math.abs(bounds.y + bounds.height - documentSize.height) <= threshold) {
+    nextPosition.y += documentSize.height - bounds.y - bounds.height
   }
-  if (Math.abs(verticalCenter - CANVAS_HEIGHT / 2) <= threshold) {
-    nextPosition.y += CANVAS_HEIGHT / 2 - verticalCenter
+  if (Math.abs(verticalCenter - documentSize.height / 2) <= threshold) {
+    nextPosition.y += documentSize.height / 2 - verticalCenter
   }
 
   return nextPosition
+}
+
+function getCropPatch(element, crop) {
+  const displayMax = Math.max(element.width, element.height)
+  const displayRatio = crop.width / crop.height
+  return {
+    cropX: crop.x,
+    cropY: crop.y,
+    cropWidth: crop.width,
+    cropHeight: crop.height,
+    width: Math.round(displayRatio >= 1 ? displayMax : displayMax * displayRatio),
+    height: Math.round(displayRatio >= 1 ? displayMax / displayRatio : displayMax),
+  }
+}
+
+function getCoverCrop(image, documentSize) {
+  if (!image) return undefined
+  const imageRatio = image.naturalWidth / image.naturalHeight
+  const documentRatio = documentSize.width / documentSize.height
+
+  if (imageRatio > documentRatio) {
+    const width = image.naturalHeight * documentRatio
+    return { x: (image.naturalWidth - width) / 2, y: 0, width, height: image.naturalHeight }
+  }
+
+  const height = image.naturalWidth / documentRatio
+  return { x: 0, y: (image.naturalHeight - height) / 2, width: image.naturalWidth, height }
 }
 
 function useCanvasImage(source) {
@@ -156,7 +195,7 @@ function useCanvasImage(source) {
   return image
 }
 
-function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }) {
+function EditableNode({ documentSize, element, isInteractive, isSelected, onChange, onSelect }) {
   const nodeRef = useRef(null)
   const transformerRef = useRef(null)
   const elementImage = useCanvasImage(element.type === 'image' ? element.source : null)
@@ -196,7 +235,7 @@ function EditableNode({ element, isInteractive, isSelected, onChange, onSelect }
     onClick: onSelect,
     onTap: onSelect,
     onDragEnd: (event) => {
-      const snappedPosition = getSnappedPosition(event.target)
+      const snappedPosition = getSnappedPosition(event.target, documentSize)
       event.target.position(snappedPosition)
       onChange({
         ...element,
@@ -362,6 +401,18 @@ function getLayerLabel(element, index) {
   return 'Retângulo'
 }
 
+function getSaveLabel(saveStatus, lastSavedAt) {
+  if (saveStatus === 'loading') return 'Carregando rascunho…'
+  if (saveStatus === 'saving') return 'Salvando…'
+  if (saveStatus === 'error') return 'Falha ao salvar'
+  if (saveStatus === 'empty') return 'Rascunho vazio'
+  if (!lastSavedAt) return 'Rascunho automático'
+  return `Salvo às ${new Date(lastSavedAt).toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  })}`
+}
+
 function EditorScreen({ onBack }) {
   const stageRef = useRef(null)
   const canvasFrameRef = useRef(null)
@@ -371,6 +422,8 @@ function EditorScreen({ onBack }) {
   const isSpacePressed = useRef(false)
   const panStart = useRef(null)
   const shortcutActions = useRef(null)
+  const hasUnsavedChanges = useRef(false)
+  const saveGeneration = useRef(0)
   const baseImage = useCanvasImage('/sample-base.svg')
 
   const [tool, setTool] = useState(getInitialTool)
@@ -382,6 +435,11 @@ function EditorScreen({ onBack }) {
   const [eraserSize, setEraserSize] = useState(34)
   const [selectedId, setSelectedId] = useState(null)
   const [elements, setElements] = useState([])
+  const [documentSize, setDocumentSize] = useState(DEFAULT_DOCUMENT_SIZE)
+  const [documentDraft, setDocumentDraft] = useState(DEFAULT_DOCUMENT_SIZE)
+  const [lockDocumentRatio, setLockDocumentRatio] = useState(true)
+  const [scaleDocumentContent, setScaleDocumentContent] = useState(false)
+  const [cropDraft, setCropDraft] = useState(null)
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
   const [status, setStatus] = useState('Escolha uma ferramenta e comece a criar.')
@@ -389,14 +447,69 @@ function EditorScreen({ onBack }) {
   const [fitMode, setFitMode] = useState(true)
   const [spaceDown, setSpaceDown] = useState(false)
   const [isPanning, setIsPanning] = useState(false)
+  const [sessionReady, setSessionReady] = useState(false)
+  const [saveStatus, setSaveStatus] = useState('loading')
+  const [lastSavedAt, setLastSavedAt] = useState(null)
 
   const selectedElement = elements.find((element) => element.id === selectedId)
+  const activeCropDraft = cropDraft?.elementId === selectedId ? cropDraft : null
+  const renderedElements = activeCropDraft
+    ? elements.map((element) => (
+        element.id === activeCropDraft.elementId
+          ? { ...element, ...getCropPatch(element, activeCropDraft) }
+          : element
+      ))
+    : elements
+  const baseCrop = getCoverCrop(baseImage, documentSize)
+  const hasPersistableContent = elements.length > 0
+    || documentSize.width !== DEFAULT_DOCUMENT_SIZE.width
+    || documentSize.height !== DEFAULT_DOCUMENT_SIZE.height
 
-  function commit(nextElements, message) {
-    setPast((current) => [...current, elements])
+  function commit(nextElements, message, nextDocumentSize = documentSize) {
+    setPast((current) => [...current, { elements, documentSize }])
     setElements(nextElements)
+    setDocumentSize(nextDocumentSize)
+    setDocumentDraft(nextDocumentSize)
     setFuture([])
     if (message) setStatus(message)
+  }
+
+  function handleBack() {
+    if (hasUnsavedChanges.current && !window.confirm('Existem alterações que ainda não foram salvas. Deseja sair mesmo assim?')) {
+      return
+    }
+    onBack()
+  }
+
+  async function clearDraft() {
+    if (hasPersistableContent && !window.confirm('Limpar todo o rascunho atual? Essa ação não pode ser desfeita.')) {
+      return
+    }
+
+    hasUnsavedChanges.current = false
+    saveGeneration.current += 1
+    setElements([])
+    setDocumentSize(DEFAULT_DOCUMENT_SIZE)
+    setDocumentDraft(DEFAULT_DOCUMENT_SIZE)
+    setSelectedId(null)
+    setCropDraft(null)
+    setPast([])
+    setFuture([])
+    setBrushColor('#ff5c7a')
+    setBrushSize(10)
+    setBrushOpacity(1)
+    setBrushSoftness(0)
+    setEraserSize(34)
+
+    try {
+      await clearEditorSession()
+      setLastSavedAt(null)
+      setSaveStatus('empty')
+      setStatus('Rascunho limpo. O editor está pronto para uma nova criação.')
+    } catch {
+      setSaveStatus('error')
+      setStatus('Não foi possível limpar o rascunho salvo no navegador.')
+    }
   }
 
   function addText() {
@@ -436,8 +549,8 @@ function EditorScreen({ onBack }) {
       ? {
           id: createId('circle'),
           type: 'circle',
-          x: CANVAS_WIDTH / 2,
-          y: CANVAS_HEIGHT / 2,
+          x: documentSize.width / 2,
+          y: documentSize.height / 2,
           radius: 74,
           fill: '#ffd447',
         }
@@ -475,8 +588,8 @@ function EditorScreen({ onBack }) {
       cropY: 0,
       cropWidth: width,
       cropHeight: height,
-      x: Math.round((CANVAS_WIDTH - nextWidth) / 2),
-      y: Math.round((CANVAS_HEIGHT - nextHeight) / 2),
+      x: Math.round((documentSize.width - nextWidth) / 2),
+      y: Math.round((documentSize.height - nextHeight) / 2),
       width: nextWidth,
       height: nextHeight,
       brightness: 1,
@@ -600,6 +713,61 @@ function EditorScreen({ onBack }) {
     })
   }
 
+  function updateDocumentDraft(axis, rawValue) {
+    const minimum = axis === 'width' ? MIN_DOCUMENT_WIDTH : MIN_DOCUMENT_HEIGHT
+    const value = clamp(Number(rawValue) || minimum, minimum, MAX_DOCUMENT_SIZE)
+
+    setDocumentDraft((current) => {
+      if (!lockDocumentRatio) return { ...current, [axis]: value }
+      const ratio = current.width / current.height
+      if (axis === 'width') {
+        return {
+          width: value,
+          height: clamp(Math.round(value / ratio), MIN_DOCUMENT_HEIGHT, MAX_DOCUMENT_SIZE),
+        }
+      }
+      return {
+        width: clamp(Math.round(value * ratio), MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_SIZE),
+        height: value,
+      }
+    })
+  }
+
+  function resizeDocument(nextSize = documentDraft) {
+    const normalizedSize = {
+      width: clamp(Math.round(nextSize.width), MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_SIZE),
+      height: clamp(Math.round(nextSize.height), MIN_DOCUMENT_HEIGHT, MAX_DOCUMENT_SIZE),
+    }
+    const scaleX = normalizedSize.width / documentSize.width
+    const scaleY = normalizedSize.height / documentSize.height
+    const nextElements = scaleDocumentContent
+      ? elements.map((element) => {
+          if (element.type === 'line') {
+            return {
+              ...element,
+              points: element.points.map((point, index) => point * (index % 2 === 0 ? scaleX : scaleY)),
+              strokeWidth: element.strokeWidth * ((scaleX + scaleY) / 2),
+            }
+          }
+          return {
+            ...element,
+            x: element.x * scaleX,
+            y: element.y * scaleY,
+            scaleX: (element.scaleX ?? 1) * scaleX,
+            scaleY: (element.scaleY ?? 1) * scaleY,
+          }
+        })
+      : elements
+
+    setCropDraft(null)
+    setFitMode(true)
+    commit(
+      nextElements,
+      `Documento redimensionado para ${normalizedSize.width} × ${normalizedSize.height}.`,
+      normalizedSize,
+    )
+  }
+
   function setZoomLevel(nextZoom) {
     const frame = canvasFrameRef.current
     const previousZoom = zoom
@@ -625,8 +793,8 @@ function EditorScreen({ onBack }) {
 
     const nextZoom = clamp(
       Math.min(
-        (frame.clientWidth - 36) / CANVAS_WIDTH,
-        (frame.clientHeight - 36) / CANVAS_HEIGHT,
+        (frame.clientWidth - 36) / documentSize.width,
+        (frame.clientHeight - 36) / documentSize.height,
       ),
       MIN_ZOOM,
       1,
@@ -635,8 +803,8 @@ function EditorScreen({ onBack }) {
     setFitMode(true)
     setZoom(nextZoom)
     requestAnimationFrame(() => {
-      frame.scrollLeft = Math.max(0, (CANVAS_WIDTH * nextZoom - frame.clientWidth) / 2)
-      frame.scrollTop = Math.max(0, (CANVAS_HEIGHT * nextZoom - frame.clientHeight) / 2)
+      frame.scrollLeft = Math.max(0, (documentSize.width * nextZoom - frame.clientWidth) / 2)
+      frame.scrollTop = Math.max(0, (documentSize.height * nextZoom - frame.clientHeight) / 2)
     })
   }
 
@@ -684,11 +852,11 @@ function EditorScreen({ onBack }) {
     let deltaY = 0
 
     if (alignment === 'left') deltaX = -bounds.x
-    if (alignment === 'center-x') deltaX = CANVAS_WIDTH / 2 - bounds.x - bounds.width / 2
-    if (alignment === 'right') deltaX = CANVAS_WIDTH - bounds.x - bounds.width
+    if (alignment === 'center-x') deltaX = documentSize.width / 2 - bounds.x - bounds.width / 2
+    if (alignment === 'right') deltaX = documentSize.width - bounds.x - bounds.width
     if (alignment === 'top') deltaY = -bounds.y
-    if (alignment === 'center-y') deltaY = CANVAS_HEIGHT / 2 - bounds.y - bounds.height / 2
-    if (alignment === 'bottom') deltaY = CANVAS_HEIGHT - bounds.y - bounds.height
+    if (alignment === 'center-y') deltaY = documentSize.height / 2 - bounds.y - bounds.height / 2
+    if (alignment === 'bottom') deltaY = documentSize.height - bounds.y - bounds.height
 
     updateSelected({
       x: selectedElement.x + deltaX,
@@ -729,42 +897,177 @@ function EditorScreen({ onBack }) {
     if (ratio && sourceWidth / sourceHeight > ratio) cropWidth = sourceHeight * ratio
     if (ratio && sourceWidth / sourceHeight < ratio) cropHeight = sourceWidth / ratio
 
-    const displayMax = Math.max(selectedElement.width, selectedElement.height)
-    const displayRatio = cropWidth / cropHeight
-    const displayWidth = displayRatio >= 1 ? displayMax : displayMax * displayRatio
-    const displayHeight = displayRatio >= 1 ? displayMax / displayRatio : displayMax
-
-    updateSelected({
-      cropX: (sourceWidth - cropWidth) / 2,
-      cropY: (sourceHeight - cropHeight) / 2,
-      cropWidth,
-      cropHeight,
-      width: Math.round(displayWidth),
-      height: Math.round(displayHeight),
-    })
+    setCropDraft(null)
+    updateSelected(getCropPatch(selectedElement, {
+      x: (sourceWidth - cropWidth) / 2,
+      y: (sourceHeight - cropHeight) / 2,
+      width: cropWidth,
+      height: cropHeight,
+    }))
   }
+
+  function beginManualCrop() {
+    if (selectedElement?.type !== 'image' || selectedElement.kind === 'sticker') return
+    setCropDraft({
+      elementId: selectedElement.id,
+      x: Math.round(selectedElement.cropX ?? 0),
+      y: Math.round(selectedElement.cropY ?? 0),
+      width: Math.round(selectedElement.cropWidth ?? selectedElement.sourceWidth),
+      height: Math.round(selectedElement.cropHeight ?? selectedElement.sourceHeight),
+    })
+    setStatus('Ajuste o enquadramento e confirme o recorte livre.')
+  }
+
+  function updateCropDraft(patch) {
+    if (!activeCropDraft || !selectedElement) return
+    const next = { ...activeCropDraft, ...patch }
+    next.width = clamp(next.width, 20, selectedElement.sourceWidth)
+    next.height = clamp(next.height, 20, selectedElement.sourceHeight)
+    next.x = clamp(next.x, 0, selectedElement.sourceWidth - next.width)
+    next.y = clamp(next.y, 0, selectedElement.sourceHeight - next.height)
+    setCropDraft(next)
+  }
+
+  function applyManualCrop() {
+    if (!activeCropDraft || !selectedElement) return
+    commit(
+      elements.map((element) => (
+        element.id === activeCropDraft.elementId
+          ? { ...element, ...getCropPatch(element, activeCropDraft) }
+          : element
+      )),
+      'Recorte livre aplicado.',
+    )
+    setCropDraft(null)
+  }
+
+  function cancelManualCrop() {
+    setCropDraft(null)
+    setStatus('Recorte livre cancelado.')
+  }
+
+  useEffect(() => {
+    let cancelled = false
+
+    loadEditorSession()
+      .then((session) => {
+        if (cancelled) return
+
+        if (session?.schemaVersion === 1) {
+          const restoredSize = {
+            width: clamp(session.documentSize?.width ?? DEFAULT_DOCUMENT_SIZE.width, MIN_DOCUMENT_WIDTH, MAX_DOCUMENT_SIZE),
+            height: clamp(session.documentSize?.height ?? DEFAULT_DOCUMENT_SIZE.height, MIN_DOCUMENT_HEIGHT, MAX_DOCUMENT_SIZE),
+          }
+          setElements(Array.isArray(session.elements) ? session.elements : [])
+          setDocumentSize(restoredSize)
+          setDocumentDraft(restoredSize)
+          setBrushColor(session.settings?.brushColor ?? '#ff5c7a')
+          setBrushSize(session.settings?.brushSize ?? 10)
+          setBrushOpacity(session.settings?.brushOpacity ?? 1)
+          setBrushSoftness(session.settings?.brushSoftness ?? 0)
+          setEraserSize(session.settings?.eraserSize ?? 34)
+          setLastSavedAt(session.savedAt ?? null)
+          setSaveStatus('saved')
+          setStatus('Rascunho restaurado deste navegador.')
+        } else {
+          setSaveStatus('empty')
+        }
+
+        setSessionReady(true)
+      })
+      .catch(() => {
+        if (cancelled) return
+        setSaveStatus('error')
+        setSessionReady(true)
+        setStatus('O editor abriu, mas o armazenamento automático não está disponível.')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!sessionReady || !hasPersistableContent) return undefined
+
+    const generation = ++saveGeneration.current
+    hasUnsavedChanges.current = true
+    const timeout = window.setTimeout(async () => {
+      setSaveStatus('saving')
+      try {
+        const savedAt = await saveEditorSession({
+          documentSize,
+          elements,
+          settings: {
+            brushColor,
+            brushOpacity,
+            brushSize,
+            brushSoftness,
+            eraserSize,
+          },
+        })
+        if (saveGeneration.current === generation) {
+          hasUnsavedChanges.current = false
+          setLastSavedAt(savedAt)
+          setSaveStatus('saved')
+        }
+      } catch {
+        if (saveGeneration.current === generation) {
+          setSaveStatus('error')
+        }
+      }
+    }, 700)
+
+    return () => {
+      window.clearTimeout(timeout)
+      if (saveGeneration.current === generation) saveGeneration.current += 1
+    }
+  }, [
+    brushColor,
+    brushOpacity,
+    brushSize,
+    brushSoftness,
+    documentSize,
+    elements,
+    eraserSize,
+    hasPersistableContent,
+    sessionReady,
+  ])
+
+  useEffect(() => {
+    function handleBeforeUnload(event) {
+      if (!hasUnsavedChanges.current) return
+      event.preventDefault()
+      event.returnValue = ''
+    }
+
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  }, [])
 
   useEffect(() => {
     const frame = canvasFrameRef.current
     if (!frame) return undefined
 
-    const observer = new ResizeObserver(() => {
+    function updateFitZoom() {
       if (!fitMode) return
       const nextZoom = clamp(
         Math.min(
-          (frame.clientWidth - 36) / CANVAS_WIDTH,
-          (frame.clientHeight - 36) / CANVAS_HEIGHT,
+          (frame.clientWidth - 36) / documentSize.width,
+          (frame.clientHeight - 36) / documentSize.height,
         ),
         MIN_ZOOM,
         1,
       )
       setZoom(nextZoom)
-    })
+    }
+
+    const observer = new ResizeObserver(updateFitZoom)
 
     observer.observe(frame)
-    if (fitMode) fitCanvas()
+    updateFitZoom()
     return () => observer.disconnect()
-  }, [fitMode])
+  }, [documentSize.height, documentSize.width, fitMode])
 
   useEffect(() => {
     shortcutActions.current = {
@@ -863,8 +1166,11 @@ function EditorScreen({ onBack }) {
     if (past.length === 0) return
     const previous = past[past.length - 1]
     setPast(past.slice(0, -1))
-    setFuture([elements, ...future])
-    setElements(previous)
+    setFuture([{ elements, documentSize }, ...future])
+    setElements(previous.elements)
+    setDocumentSize(previous.documentSize)
+    setDocumentDraft(previous.documentSize)
+    setCropDraft(null)
     setSelectedId(null)
     setStatus('Ação desfeita.')
   }
@@ -873,8 +1179,11 @@ function EditorScreen({ onBack }) {
     if (future.length === 0) return
     const next = future[0]
     setFuture(future.slice(1))
-    setPast([...past, elements])
-    setElements(next)
+    setPast([...past, { elements, documentSize }])
+    setElements(next.elements)
+    setDocumentSize(next.documentSize)
+    setDocumentDraft(next.documentSize)
+    setCropDraft(null)
     setSelectedId(null)
     setStatus('Ação refeita.')
   }
@@ -952,7 +1261,7 @@ function EditorScreen({ onBack }) {
 
     event.evt.preventDefault()
     isDrawing.current = true
-    drawingStart.current = elements
+    drawingStart.current = { elements, documentSize }
     const point = event.target.getStage().getPointerPosition()
     const nextLine = {
       id: createId('line'),
@@ -1014,10 +1323,33 @@ function EditorScreen({ onBack }) {
   return (
     <main className="editor-shell">
       <header className="editor-header">
-        <button className="back-button" type="button" onClick={onBack}>← Menu</button>
+        <button className="back-button" type="button" onClick={handleBack}>← Menu</button>
         <div>
           <span className="round-label">Rodada de teste</span>
           <strong>Transforme o passeio em uma aventura impossível</strong>
+          <div className="session-status-row">
+            <span className={`save-status is-${saveStatus}`} aria-live="polite">
+              <i
+                className={`bi ${saveStatus === 'error'
+                  ? 'bi-exclamation-triangle-fill'
+                  : saveStatus === 'saving'
+                    ? 'bi-arrow-repeat'
+                    : saveStatus === 'saved'
+                      ? 'bi-cloud-check-fill'
+                      : 'bi-cloud'}`}
+                aria-hidden="true"
+              />
+              {getSaveLabel(saveStatus, lastSavedAt)}
+            </span>
+            <button
+              className="clear-draft-button"
+              type="button"
+              onClick={clearDraft}
+              disabled={saveStatus === 'loading' || !hasPersistableContent}
+            >
+              Limpar rascunho
+            </button>
+          </div>
         </div>
         <div className="timer" aria-label="Quatro minutos restantes">04:00</div>
         <button className="finish-button" type="button" onClick={exportImage}>
@@ -1127,7 +1459,14 @@ function EditorScreen({ onBack }) {
               </button>
               <button type="button" onClick={() => setZoomLevel(zoom + 0.1)} aria-label="Aumentar zoom">+</button>
             </div>
-            <span className="canvas-dimensions">{CANVAS_WIDTH} × {CANVAS_HEIGHT}</span>
+            <button
+              className="canvas-dimensions"
+              type="button"
+              onClick={() => setSidePanel('document')}
+              title="Abrir configurações do documento"
+            >
+              {documentSize.width} × {documentSize.height}
+            </button>
           </div>
 
           <div
@@ -1142,18 +1481,22 @@ function EditorScreen({ onBack }) {
             <div
               className="stage-scaler"
               style={{
-                width: CANVAS_WIDTH * zoom,
-                height: CANVAS_HEIGHT * zoom,
+                width: documentSize.width * zoom,
+                height: documentSize.height * zoom,
               }}
             >
               <div
                 className="stage-transform"
-                style={{ transform: `scale(${zoom})` }}
+                style={{
+                  width: documentSize.width,
+                  height: documentSize.height,
+                  transform: `scale(${zoom})`,
+                }}
               >
                 <Stage
                   ref={stageRef}
-                  width={CANVAS_WIDTH}
-                  height={CANVAS_HEIGHT}
+                  width={documentSize.width}
+                  height={documentSize.height}
                   onMouseDown={beginDrawing}
                   onMouseMove={continueDrawing}
                   onMouseUp={finishDrawing}
@@ -1163,19 +1506,20 @@ function EditorScreen({ onBack }) {
                   onTouchEnd={finishDrawing}
                 >
                   <Layer listening={false}>
-                    <Rect width={CANVAS_WIDTH} height={CANVAS_HEIGHT} fill="#dcefff" listening={false} />
+                    <Rect width={documentSize.width} height={documentSize.height} fill="#dcefff" listening={false} />
                     {baseImage && (
                       <KonvaImage
                         image={baseImage}
-                        width={CANVAS_WIDTH}
-                        height={CANVAS_HEIGHT}
+                        width={documentSize.width}
+                        height={documentSize.height}
+                        crop={baseCrop}
                         listening={false}
                       />
                     )}
                   </Layer>
 
                   <Layer>
-                    {elements.map((element) => {
+                    {renderedElements.map((element) => {
                       if (element.visible === false) return null
 
                       if (element.type === 'line') {
@@ -1201,11 +1545,13 @@ function EditorScreen({ onBack }) {
                       return (
                         <EditableNode
                           key={element.id}
+                          documentSize={documentSize}
                           element={element}
-                          isInteractive={tool === 'select' && !element.locked}
+                          isInteractive={!activeCropDraft && tool === 'select' && !element.locked}
                           isSelected={selectedId === element.id && !element.locked}
                           onSelect={() => {
                             if (tool === 'select') {
+                              setCropDraft(null)
                               setSelectedId(element.id)
                               setSidePanel('properties')
                             }
@@ -1229,6 +1575,15 @@ function EditorScreen({ onBack }) {
             <button
               type="button"
               role="tab"
+              aria-selected={sidePanel === 'document'}
+              className={sidePanel === 'document' ? 'is-active' : ''}
+              onClick={() => setSidePanel('document')}
+            >
+              Documento
+            </button>
+            <button
+              type="button"
+              role="tab"
               aria-selected={sidePanel === 'properties'}
               className={sidePanel === 'properties' ? 'is-active' : ''}
               onClick={() => setSidePanel('properties')}
@@ -1246,7 +1601,90 @@ function EditorScreen({ onBack }) {
             </button>
           </div>
 
-          {sidePanel === 'layers' ? (
+          {sidePanel === 'document' ? (
+            <div className="document-panel" role="tabpanel">
+              <h2>Documento</h2>
+              <p className="panel-description">Escolha um formato ou defina um tamanho personalizado.</p>
+
+              <div className="document-presets" aria-label="Formatos do documento">
+                {DOCUMENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => {
+                      setDocumentDraft({ width: preset.width, height: preset.height })
+                      resizeDocument({ width: preset.width, height: preset.height })
+                    }}
+                  >
+                    <strong>{preset.label}</strong>
+                    <span>{preset.detail}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="document-size-grid">
+                <label htmlFor="document-width">
+                  Largura
+                  <input
+                    id="document-width"
+                    type="number"
+                    min={MIN_DOCUMENT_WIDTH}
+                    max={MAX_DOCUMENT_SIZE}
+                    value={documentDraft.width}
+                    onChange={(event) => updateDocumentDraft('width', event.target.value)}
+                  />
+                </label>
+                <button
+                  className="swap-document-size"
+                  type="button"
+                  onClick={() => setDocumentDraft({
+                    width: documentDraft.height,
+                    height: documentDraft.width,
+                  })}
+                  aria-label="Trocar largura e altura"
+                  title="Trocar orientação"
+                >
+                  <i className="bi bi-arrow-left-right" aria-hidden="true" />
+                </button>
+                <label htmlFor="document-height">
+                  Altura
+                  <input
+                    id="document-height"
+                    type="number"
+                    min={MIN_DOCUMENT_HEIGHT}
+                    max={MAX_DOCUMENT_SIZE}
+                    value={documentDraft.height}
+                    onChange={(event) => updateDocumentDraft('height', event.target.value)}
+                  />
+                </label>
+              </div>
+
+              <label className="checkbox-control">
+                <input
+                  type="checkbox"
+                  checked={lockDocumentRatio}
+                  onChange={(event) => setLockDocumentRatio(event.target.checked)}
+                />
+                Manter proporção
+              </label>
+              <label className="checkbox-control">
+                <input
+                  type="checkbox"
+                  checked={scaleDocumentContent}
+                  onChange={(event) => setScaleDocumentContent(event.target.checked)}
+                />
+                Redimensionar conteúdo junto
+              </label>
+
+              <div className="document-summary">
+                <span>Atual</span>
+                <strong>{documentSize.width} × {documentSize.height}px</strong>
+              </div>
+              <button className="apply-document-size" type="button" onClick={() => resizeDocument()}>
+                Aplicar tamanho
+              </button>
+            </div>
+          ) : sidePanel === 'layers' ? (
             <div className="layers-panel" role="tabpanel">
               <div className="layer-list">
                 {[...elements].reverse().map((element, reversedIndex) => {
@@ -1262,6 +1700,7 @@ function EditorScreen({ onBack }) {
                         type="button"
                         onClick={() => {
                           if (element.visible === false) return
+                          setCropDraft(null)
                           setSelectedId(element.id)
                           setTool('select')
                           setSidePanel('properties')
@@ -1754,11 +2193,69 @@ function EditorScreen({ onBack }) {
 
                       {selectedElement.kind !== 'sticker' && (
                         <fieldset className="crop-controls">
-                          <legend>Recorte central</legend>
+                          <legend>Recorte</legend>
                           <button type="button" onClick={() => applyCropRatio(null)}>Original</button>
                           <button type="button" onClick={() => applyCropRatio(1)}>1:1</button>
                           <button type="button" onClick={() => applyCropRatio(4 / 5)}>4:5</button>
                           <button type="button" onClick={() => applyCropRatio(16 / 9)}>16:9</button>
+                          <button
+                            className={`manual-crop-trigger${activeCropDraft ? ' is-active' : ''}`}
+                            type="button"
+                            onClick={beginManualCrop}
+                          >
+                            <i className="bi bi-crop" aria-hidden="true" /> Recorte livre
+                          </button>
+
+                          {activeCropDraft && (
+                            <div className="manual-crop-editor">
+                              <p>Área da imagem original</p>
+
+                              <label htmlFor="crop-x">Posição X: {Math.round(activeCropDraft.x)}px</label>
+                              <input
+                                id="crop-x"
+                                type="range"
+                                min="0"
+                                max={Math.max(0, selectedElement.sourceWidth - activeCropDraft.width)}
+                                value={activeCropDraft.x}
+                                onChange={(event) => updateCropDraft({ x: Number(event.target.value) })}
+                              />
+
+                              <label htmlFor="crop-y">Posição Y: {Math.round(activeCropDraft.y)}px</label>
+                              <input
+                                id="crop-y"
+                                type="range"
+                                min="0"
+                                max={Math.max(0, selectedElement.sourceHeight - activeCropDraft.height)}
+                                value={activeCropDraft.y}
+                                onChange={(event) => updateCropDraft({ y: Number(event.target.value) })}
+                              />
+
+                              <label htmlFor="crop-width">Largura: {Math.round(activeCropDraft.width)}px</label>
+                              <input
+                                id="crop-width"
+                                type="range"
+                                min="20"
+                                max={selectedElement.sourceWidth - activeCropDraft.x}
+                                value={activeCropDraft.width}
+                                onChange={(event) => updateCropDraft({ width: Number(event.target.value) })}
+                              />
+
+                              <label htmlFor="crop-height">Altura: {Math.round(activeCropDraft.height)}px</label>
+                              <input
+                                id="crop-height"
+                                type="range"
+                                min="20"
+                                max={selectedElement.sourceHeight - activeCropDraft.y}
+                                value={activeCropDraft.height}
+                                onChange={(event) => updateCropDraft({ height: Number(event.target.value) })}
+                              />
+
+                              <div className="manual-crop-actions">
+                                <button type="button" onClick={cancelManualCrop}>Cancelar</button>
+                                <button type="button" onClick={applyManualCrop}>Aplicar</button>
+                              </div>
+                            </div>
+                          )}
                         </fieldset>
                       )}
                     </>

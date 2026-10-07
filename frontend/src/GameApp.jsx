@@ -1,30 +1,66 @@
 import { lazy, Suspense, useState } from 'react'
+import IdentityScreen from './components/IdentityScreen.jsx'
+import LobbyScreen from './components/LobbyScreen.jsx'
 import './game.css'
 
 const ROOM_CODE_LENGTH = 6
+const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const EditorScreen = lazy(() => import('./components/EditorScreen.jsx'))
 
-function getInitialScreen() {
-  const requestedScreen = new URLSearchParams(window.location.search).get('screen')
-  return requestedScreen === 'editor' ? 'editor' : 'menu'
+function getInitialRoute() {
+  const params = new URLSearchParams(window.location.search)
+  const requestedScreen = params.get('screen')
+  const screen = ['identity', 'lobby', 'editor'].includes(requestedScreen)
+    ? requestedScreen
+    : 'menu'
+  return {
+    screen,
+    room: {
+      code: (params.get('room') || 'ABC123').slice(0, ROOM_CODE_LENGTH).toUpperCase(),
+      isHost: params.get('role') !== 'guest',
+    },
+  }
+}
+
+function createRoomCode() {
+  return Array.from({ length: ROOM_CODE_LENGTH }, () => (
+    ROOM_ALPHABET[Math.floor(Math.random() * ROOM_ALPHABET.length)]
+  )).join('')
+}
+
+function loadRoomIdentity(roomCode) {
+  try {
+    const storedIdentity = localStorage.getItem(`thumbs:identity:${roomCode}`)
+    return storedIdentity ? JSON.parse(storedIdentity) : { avatarId: 'cool', username: '' }
+  } catch {
+    return { avatarId: 'cool', username: '' }
+  }
 }
 
 function GameApp() {
-  const [screen, setScreen] = useState(getInitialScreen)
+  const initialRoute = getInitialRoute()
+  const [screen, setScreen] = useState(initialRoute.screen)
+  const [room, setRoom] = useState(initialRoute.room)
+  const [player, setPlayer] = useState(() => loadRoomIdentity(initialRoute.room.code))
   const [roomCode, setRoomCode] = useState('')
-  const [notice, setNotice] = useState('')
 
   const normalizedCode = roomCode.trim().toUpperCase()
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
 
+  function openIdentity(nextRoom) {
+    setRoom(nextRoom)
+    setPlayer(loadRoomIdentity(nextRoom.code))
+    setScreen('identity')
+  }
+
   function handleCreateGame() {
-    setScreen('editor')
+    openIdentity({ code: createRoomCode(), isHost: true })
   }
 
   function handleJoinGame(event) {
     event.preventDefault()
     if (!canJoin) return
-    setNotice(`A sala ${normalizedCode} será conectada ao multiplayer.`)
+    openIdentity({ code: normalizedCode, isHost: false })
   }
 
   function handleCodeChange(event) {
@@ -34,13 +70,47 @@ function GameApp() {
       .toUpperCase()
 
     setRoomCode(nextCode)
-    setNotice('')
+  }
+
+  function handleIdentity(identity) {
+    const nextPlayer = {
+      ...identity,
+      id: player.id ?? crypto.randomUUID(),
+      roomCode: room.code,
+    }
+    localStorage.setItem(`thumbs:identity:${room.code}`, JSON.stringify(nextPlayer))
+    setPlayer(nextPlayer)
+    setScreen('lobby')
+  }
+
+  if (screen === 'identity') {
+    return (
+      <IdentityScreen
+        initialUsername={player}
+        isHost={room.isHost}
+        roomCode={room.code}
+        onBack={() => setScreen('menu')}
+        onContinue={handleIdentity}
+      />
+    )
+  }
+
+  if (screen === 'lobby') {
+    return (
+      <LobbyScreen
+        isHost={room.isHost}
+        player={player.username ? player : { avatarId: 'cool', username: 'Visitante' }}
+        roomCode={room.code}
+        onBack={() => setScreen('identity')}
+        onStart={() => setScreen('editor')}
+      />
+    )
   }
 
   if (screen === 'editor') {
     return (
       <Suspense fallback={<div className="screen-loading">Preparando o editor…</div>}>
-        <EditorScreen onBack={() => setScreen('menu')} />
+        <EditorScreen onBack={() => setScreen('lobby')} />
       </Suspense>
     )
   }
@@ -112,7 +182,7 @@ function GameApp() {
           </form>
 
           <p className="notice" aria-live="polite">
-            {notice || 'Nenhum cadastro. Só escolher um nome e jogar.'}
+            Nenhum cadastro. Só escolher um nome e jogar.
           </p>
         </div>
       </section>

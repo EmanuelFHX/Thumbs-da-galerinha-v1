@@ -1,6 +1,6 @@
 # Especificação do produto — v0.1
 
-Atualizado em: 2026-10-06
+Atualizado em: 2026-10-07
 
 > As regras abaixo são propostas para o primeiro protótipo. Elas devem ser
 > validadas em partidas locais antes de orientar o multiplayer.
@@ -28,7 +28,19 @@ domina ferramentas profissionais de edição.
 - Aplicação web executada diretamente no navegador.
 - Navegador desktop como primeiro alvo de experiência e testes.
 - Layout responsivo preparado para telas menores, sem prometer editor mobile no MVP.
-- Sem contas obrigatórias nas primeiras fases.
+- Sem contas: cada jogador escolhe uma identidade temporária ao entrar na sala.
+
+## Identidade temporária do jogador
+
+- Criar ou entrar em uma sala abre a etapa de escolha de identidade antes do lobby.
+- O jogador informa um username visível apenas naquela sala.
+- O jogador escolhe um avatar em uma coleção própria e pré-definida pelo jogo.
+- Não há email, senha, perfil global, histórico público ou cadastro obrigatório.
+- Username e avatar permanecem associados ao jogador durante a partida e a reconexão.
+- Um identificador técnico aleatório é salvo no navegador para permitir reconexão à mesma sala.
+- A identidade expira quando a sala é encerrada ou removida por inatividade.
+- Usernames devem ter de 2 a 18 caracteres e ser únicos dentro da sala, ignorando maiúsculas e minúsculas.
+- Upload de avatar personalizado fica fora do MVP para evitar moderação e armazenamento desnecessários.
 
 ## Diretriz técnica confirmada
 
@@ -58,15 +70,16 @@ regra arbitrária antes de entendermos o ritmo real das partidas.
 
 ## Ciclo principal
 
-1. O host cria a partida e escolhe as configurações.
-2. Jogadores entram no lobby e confirmam que estão prontos.
-3. O jogo sorteia uma imagem-base e um desafio.
-4. Todos editam durante o mesmo intervalo.
-5. O tempo acaba e as edições são enviadas automaticamente.
-6. A galeria apresenta os trabalhos sem revelar os autores.
-7. Cada jogador vota em um trabalho que não seja o próprio.
-8. O jogo revela votos, autores e vencedor da rodada.
-9. Após a última rodada, o placar final é apresentado.
+1. O host cria a partida e escolhe username e avatar.
+2. Os demais jogadores informam o código, escolhem username e avatar e entram no lobby.
+3. Jogadores confirmam que estão prontos.
+4. O jogo sorteia uma imagem-base e um desafio.
+5. Todos editam durante o mesmo intervalo.
+6. O tempo acaba e as edições são enviadas automaticamente.
+7. A galeria apresenta os trabalhos sem revelar os autores.
+8. Cada jogador vota em um trabalho que não seja o próprio.
+9. O jogo revela votos, autores e vencedor da rodada.
+10. Após a última rodada, o placar final é apresentado.
 
 ## Escopo do protótipo local
 

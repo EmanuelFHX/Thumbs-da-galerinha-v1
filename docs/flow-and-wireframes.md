@@ -1,6 +1,6 @@
 # Fluxo e wireframes — v0.1
 
-Atualizado em: 2026-10-06
+Atualizado em: 2026-10-07
 
 Os wireframes abaixo representam hierarquia e comportamento, não acabamento visual.
 
@@ -8,10 +8,10 @@ Os wireframes abaixo representam hierarquia e comportamento, não acabamento vis
 
 ```text
 Menu
-├── Criar sala ──> Configuração ──> Lobby
-└── Entrar com código ────────────> Lobby
-                                      │
-                                      v
+├── Criar sala ──> Configuração ──> Identidade ──> Lobby
+└── Entrar com código ────────────> Identidade ──> Lobby
+                                                    │
+                                                    v
               Desafio ──> Editor ──> Envio
                  ^                       │
                  │                       v
@@ -37,7 +37,26 @@ Menu
 Objetivo: apresentar imediatamente as duas ações principais. Não usar uma landing
 page longa antes do jogo.
 
-## 2. Lobby
+## 2. Identidade da sala
+
+```text
+┌──────────────────────────────────────────────────────────┐
+│                   QUEM É VOCÊ?                           │
+│                                                          │
+│ Username                                                 │
+│ [ Galerinha123________________ ]                         │
+│                                                          │
+│ Escolha seu avatar                                       │
+│ [ 🙂 ] [ 🤠 ] [ 👽 ] [ 🤖 ] [ 👻 ] [ 🐸 ]              │
+│                                                          │
+│                         [ ENTRAR NA SALA ]                │
+└──────────────────────────────────────────────────────────┘
+```
+
+A identidade vale somente para a sala atual. Não pedir email, senha ou criação de
+conta. O botão só é liberado com username válido e avatar selecionado.
+
+## 3. Lobby
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
@@ -54,7 +73,7 @@ page longa antes do jogo.
 
 O botão de iniciar pertence ao host. Os demais jogadores veem seu estado de pronto.
 
-## 3. Apresentação do desafio
+## 4. Apresentação do desafio
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
@@ -70,7 +89,7 @@ O botão de iniciar pertence ao host. Os demais jogadores veem seu estado de pro
 
 A tela é curta e igual para todos. O texto do desafio permanece acessível no editor.
 
-## 4. Editor
+## 5. Editor
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
@@ -90,7 +109,7 @@ A tela é curta e igual para todos. O texto do desafio permanece acessível no e
 O canvas domina a tela. Ferramentas avançadas aparecem apenas quando relevantes.
 O botão de envio confirma a ação; quando o tempo acaba, o estado atual é salvo.
 
-## 5. Galeria e votação
+## 6. Galeria e votação
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
@@ -108,7 +127,7 @@ O botão de envio confirma a ação; quando o tempo acaba, o estado atual é sal
 
 A ordem dos trabalhos é aleatória. Nome e avatar aparecem somente na revelação.
 
-## 6. Revelação da rodada
+## 7. Revelação da rodada
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
@@ -125,7 +144,7 @@ A ordem dos trabalhos é aleatória. Nome e avatar aparecem somente na revelaç�
 A revelação pode acontecer em etapas: votos, autor e colocação. A animação deve ser
 curta o bastante para continuar divertida após várias rodadas.
 
-## 7. Placar final
+## 8. Placar final
 
 ```text
 ┌──────────────────────────────────────────────────────────┐
