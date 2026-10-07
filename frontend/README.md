@@ -1,6 +1,6 @@
 # Frontend — Thumbs da Galerinha
 
-Aplicação web do jogo, construída com React, JavaScript, Vite e Konva.
+Aplicação web do jogo, construída com React, JavaScript, Vite, Konva e Bootstrap Icons.
 
 ## Comandos
 

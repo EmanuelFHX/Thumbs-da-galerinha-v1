@@ -1032,11 +1032,11 @@ function EditorScreen({ onBack }) {
             onClick={() => setTool('select')}
             title="Selecionar e mover"
           >
-            <span aria-hidden="true">↖</span>
+            <i className="bi bi-cursor-fill" aria-hidden="true" />
             Selecionar
           </ToolButton>
           <ToolButton onClick={addText} title="Adicionar texto">
-            <span aria-hidden="true">T</span>
+            <i className="bi bi-fonts" aria-hidden="true" />
             Texto
           </ToolButton>
           <ToolButton
@@ -1048,7 +1048,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Desenhar à mão livre"
           >
-            <span aria-hidden="true">✎</span>
+            <i className="bi bi-brush-fill" aria-hidden="true" />
             Pincel
           </ToolButton>
           <ToolButton
@@ -1060,7 +1060,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Apagar conteúdo desenhado"
           >
-            <span aria-hidden="true">⌫</span>
+            <i className="bi bi-eraser-fill" aria-hidden="true" />
             Borracha
           </ToolButton>
           <ToolButton
@@ -1073,19 +1073,19 @@ function EditorScreen({ onBack }) {
             }}
             title="Capturar cor do canvas"
           >
-            <span aria-hidden="true">◒</span>
+            <i className="bi bi-eyedropper" aria-hidden="true" />
             Conta-gotas
           </ToolButton>
           <ToolButton onClick={() => addShape('rect')} title="Adicionar retângulo">
-            <span aria-hidden="true">□</span>
+            <i className="bi bi-square" aria-hidden="true" />
             Retângulo
           </ToolButton>
           <ToolButton onClick={() => addShape('circle')} title="Adicionar círculo">
-            <span aria-hidden="true">○</span>
+            <i className="bi bi-circle" aria-hidden="true" />
             Círculo
           </ToolButton>
           <ToolButton onClick={() => fileInputRef.current?.click()} title="Importar imagem">
-            <span aria-hidden="true">▧</span>
+            <i className="bi bi-image" aria-hidden="true" />
             Imagem
           </ToolButton>
           <ToolButton
@@ -1096,7 +1096,7 @@ function EditorScreen({ onBack }) {
             }}
             title="Abrir stickers"
           >
-            <span aria-hidden="true">★</span>
+            <i className="bi bi-star-fill" aria-hidden="true" />
             Stickers
           </ToolButton>
           <input
