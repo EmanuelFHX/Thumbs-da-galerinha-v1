@@ -32,6 +32,9 @@ npm run build
 - Ajustes não destrutivos de brilho, contraste, saturação, desfoque e preto e branco.
 - Zoom, ajuste à tela, pan com Espaço e encaixe no centro/bordas.
 - Alinhamento, flip horizontal/vertical e recorte central por proporção.
+- Redimensionamento do documento com presets, proporção bloqueável e escala opcional do conteúdo.
+- Recorte livre de imagens com prévia ao vivo, aplicar e cancelar.
+- Rascunho automático no IndexedDB, restauração da sessão e proteção de saída.
 - Exclusão, desfazer, refazer e exportação PNG.
 
 ## Atalhos

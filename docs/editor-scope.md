@@ -60,15 +60,18 @@ rápidas durante uma rodada competitiva.
 - Borracha não destrutiva em camada própria e conta-gotas.
 - Texto com fontes, peso, itálico, sublinhado, alinhamento, espaçamento, entrelinhas, contorno e sombra.
 - Presets de texto Doodle, Meme e Pop.
+- Documento redimensionável com formatos para YouTube, quadrado, retrato e Stories.
+- Opção de manter a proporção e redimensionar o conteúdo junto ao documento.
+- Recorte livre de imagens com prévia ao vivo, aplicação e cancelamento.
+- Rascunho automático em IndexedDB com restauração após recarregar a página.
+- Indicador de salvamento, limpeza do rascunho e proteção contra saída com alterações pendentes.
 - Camadas com ordem, visibilidade, bloqueio, duplicação, exclusão e opacidade.
 - Brilho, contraste, saturação, desfoque e preto e branco por imagem.
 - Desfazer, refazer e exportação PNG.
 
 ## Próximas entregas
 
-1. Redimensionamento do documento e recorte manual livre.
-2. Salvamento automático e restauração de sessão.
-3. Testes automatizados das interações do editor.
+1. Testes automatizados das interações do editor.
 
 ## Fora do primeiro MVP
 

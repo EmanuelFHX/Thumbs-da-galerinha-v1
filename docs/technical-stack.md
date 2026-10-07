@@ -1,6 +1,6 @@
 # Decisões técnicas — v0.1
 
-Atualizado em: 2026-10-06
+Atualizado em: 2026-10-07
 
 ## Confirmado
 
@@ -12,6 +12,7 @@ Atualizado em: 2026-10-06
 | Build e desenvolvimento | Vite |
 | Canvas do editor | Konva com integração `react-konva` |
 | Backend | Ecossistema JavaScript, com Node.js como runtime planejado |
+| Identidade | Convidado temporário por sala, sem cadastro ou perfil global |
 | Organização Git | Trabalho de frontend na branch `frontend`; backend na branch `backend` |
 
 ## Princípios
@@ -22,12 +23,14 @@ Atualizado em: 2026-10-06
 - Preservar o estado da edição no navegador durante a rodada.
 - Exportar a composição final em um formato de imagem amplamente suportado.
 - Preparar a arquitetura para comunicação em tempo real sem introduzi-la no MVP local.
+- Manter username e avatar como dados efêmeros da sala.
+- Se Firebase for adotado, usar identidade anônima apenas como mecanismo técnico de sessão e reconexão, sem fluxo de conta para o jogador.
 
 ## Decisões ainda abertas
 
 - Framework HTTP do backend.
 - Tecnologia de comunicação em tempo real.
-- Banco de dados e armazenamento das imagens.
+- Uso de Firebase para salas, sincronização, presença e armazenamento das imagens.
 - Estratégia de testes.
 
 Essas escolhas devem ser feitas por necessidade do produto, sem adicionar dependências
