@@ -25,9 +25,18 @@ domina ferramentas profissionais de edição.
 
 - Grupos de amigos e criadores de conteúdo.
 - Partidas curtas, casuais e rejogáveis.
-- Navegador desktop como primeiro alvo.
+- Aplicação web executada diretamente no navegador.
+- Navegador desktop como primeiro alvo de experiência e testes.
 - Layout responsivo preparado para telas menores, sem prometer editor mobile no MVP.
 - Sem contas obrigatórias nas primeiras fases.
+
+## Diretriz técnica confirmada
+
+- JavaScript é a linguagem principal do projeto.
+- O frontend deve usar APIs e tecnologias compatíveis com navegadores modernos.
+- O backend também seguirá o ecossistema JavaScript, com Node.js como runtime planejado.
+- A escolha de framework, biblioteca de canvas e protocolo de tempo real será feita
+  separadamente, antes da implementação de cada camada.
 
 ## Configuração padrão da partida
 
@@ -109,4 +118,3 @@ e exportar o resultado sem sair da aplicação.
 - O editor oferece liberdade sem parecer complexo?
 - A revelação deve mostrar todos os autores de uma vez ou um por um?
 - Quantos trabalhos cabem por tela sem reduzir demais as imagens?
-

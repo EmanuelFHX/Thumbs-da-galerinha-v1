@@ -10,6 +10,7 @@ nos trabalhos da galeria.
 - Editor simples o bastante para ser entendido durante a primeira partida.
 - Estética **Cartoon Doodle / Hand-Drawn UI** em toda a experiência.
 - Revelação e votação tratadas como os momentos sociais mais importantes.
+- Aplicação web executada no navegador, com JavaScript como linguagem principal.
 
 ## Estrutura
 
@@ -30,4 +31,4 @@ docs/      Regras, experiência e decisões compartilhadas
 - [Especificação do produto](docs/product-spec.md)
 - [Direção visual](docs/design-direction.md)
 - [Fluxo e wireframes](docs/flow-and-wireframes.md)
-
+- [Decisões técnicas](docs/technical-stack.md)
