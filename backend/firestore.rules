@@ -1,0 +1,166 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function playerPath(roomCode, playerId) {
+      return /databases/$(database)/documents/rooms/$(roomCode)/players/$(playerId);
+    }
+
+    function usernamePath(roomCode, usernameKey) {
+      return /databases/$(database)/documents/rooms/$(roomCode)/usernames/$(usernameKey);
+    }
+
+    function roomPath(roomCode) {
+      return /databases/$(database)/documents/rooms/$(roomCode);
+    }
+
+    function isRoomMember(roomCode) {
+      return signedIn() && exists(playerPath(roomCode, request.auth.uid));
+    }
+
+    function validRoomCode(roomCode) {
+      return roomCode.matches('^[A-HJ-NP-Z2-9]{6}$');
+    }
+
+    function validPlayer(data) {
+      return data.keys().hasAll([
+          'avatarId',
+          'isHost',
+          'joinedAt',
+          'ready',
+          'username',
+          'usernameKey'
+        ])
+        && data.keys().hasOnly([
+          'avatarId',
+          'isHost',
+          'joinedAt',
+          'ready',
+          'username',
+          'usernameKey'
+        ])
+        && data.avatarId is string
+        && data.avatarId.size() >= 1
+        && data.avatarId.size() <= 32
+        && data.isHost is bool
+        && data.joinedAt == request.time
+        && data.ready == true
+        && data.username is string
+        && data.username.size() >= 2
+        && data.username.size() <= 18
+        && data.usernameKey is string
+        && data.usernameKey.size() >= 1
+        && data.usernameKey.size() <= 128;
+    }
+
+    match /rooms/{roomCode} {
+      allow get: if signedIn();
+      allow list: if false;
+
+      allow create: if signedIn()
+        && validRoomCode(roomCode)
+        && request.resource.data.keys().hasAll([
+          'createdAt',
+          'hostId',
+          'maxPlayers',
+          'playerCount',
+          'status',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasOnly([
+          'createdAt',
+          'hostId',
+          'maxPlayers',
+          'playerCount',
+          'status',
+          'updatedAt'
+        ])
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.maxPlayers == 8
+        && request.resource.data.playerCount == 1
+        && request.resource.data.status == 'lobby'
+        && existsAfter(playerPath(roomCode, request.auth.uid));
+
+      allow update: if signedIn() && (
+        (
+          resource.data.hostId == request.auth.uid
+          && resource.data.status == 'lobby'
+          && request.resource.data.status == 'editing'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt'])
+        )
+        ||
+        (
+          resource.data.status == 'lobby'
+          && request.resource.data.status == 'lobby'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.playerCount == resource.data.playerCount + 1
+          && request.resource.data.playerCount <= resource.data.maxPlayers
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['playerCount', 'updatedAt'])
+          && !exists(playerPath(roomCode, request.auth.uid))
+          && existsAfter(playerPath(roomCode, request.auth.uid))
+        )
+      );
+
+      allow delete: if false;
+
+      match /players/{playerId} {
+        allow get: if signedIn()
+          && (request.auth.uid == playerId || isRoomMember(roomCode));
+        allow list: if signedIn()
+          && (request.auth.uid == playerId || isRoomMember(roomCode));
+
+        allow create: if signedIn()
+          && request.auth.uid == playerId
+          && existsAfter(roomPath(roomCode))
+          && getAfter(roomPath(roomCode)).data.status == 'lobby'
+          && validPlayer(request.resource.data)
+          && request.resource.data.isHost
+            == (getAfter(roomPath(roomCode)).data.hostId == request.auth.uid)
+          && existsAfter(usernamePath(roomCode, request.resource.data.usernameKey))
+          && getAfter(usernamePath(roomCode, request.resource.data.usernameKey)).data.playerId
+            == request.auth.uid;
+
+        allow update: if signedIn()
+          && request.auth.uid == playerId
+          && get(roomPath(roomCode)).data.status == 'lobby'
+          && validPlayer(request.resource.data)
+          && request.resource.data.isHost == resource.data.isHost
+          && existsAfter(usernamePath(roomCode, request.resource.data.usernameKey))
+          && getAfter(usernamePath(roomCode, request.resource.data.usernameKey)).data.playerId
+            == request.auth.uid;
+
+        allow delete: if false;
+      }
+
+      match /usernames/{usernameKey} {
+        allow get: if signedIn();
+        allow list: if false;
+
+        allow create: if signedIn()
+          && request.resource.data.keys().hasOnly(['playerId'])
+          && request.resource.data.playerId == request.auth.uid
+          && existsAfter(playerPath(roomCode, request.auth.uid))
+          && getAfter(playerPath(roomCode, request.auth.uid)).data.usernameKey == usernameKey;
+
+        allow update: if signedIn()
+          && resource.data.playerId == request.auth.uid
+          && request.resource.data.keys().hasOnly(['playerId'])
+          && request.resource.data.playerId == request.auth.uid
+          && existsAfter(playerPath(roomCode, request.auth.uid))
+          && getAfter(playerPath(roomCode, request.auth.uid)).data.usernameKey == usernameKey;
+
+        allow delete: if signedIn()
+          && resource.data.playerId == request.auth.uid;
+      }
+    }
+  }
+}

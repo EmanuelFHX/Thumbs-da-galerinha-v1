@@ -1,0 +1,17 @@
+{
+  "name": "thumbs-da-galerinha-backend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "test": "npm run test:rules",
+    "test:rules": "npx --yes firebase-tools@15.32.1 emulators:exec --only firestore --project thumbs-rules-test \"node --test tests/firestore.rules.test.js\""
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase": "^13.0.0"
+  },
+  "overrides": {
+    "@grpc/grpc-js": "^1.14.5"
+  }
+}
