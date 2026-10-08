@@ -1,7 +1,7 @@
 import { useEffect, useEffectEvent } from 'react'
 import './session.css'
 
-const LOBBY_TRANSITION_DURATION_MS = 2200
+const LOBBY_TRANSITION_DURATION_MS = 3000
 
 function LobbyTransitionScreen({ onComplete, roomCode }) {
   const completeTransition = useEffectEvent(onComplete)

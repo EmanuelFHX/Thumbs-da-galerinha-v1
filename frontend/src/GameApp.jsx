@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import BaseImageSubmitScreen from './components/BaseImageSubmitScreen.jsx'
 import BaseImageVoteScreen from './components/BaseImageVoteScreen.jsx'
 import ChallengeScreen from './components/ChallengeScreen.jsx'
@@ -6,8 +6,14 @@ import IdentityScreen from './components/IdentityScreen.jsx'
 import LobbyScreen from './components/LobbyScreen.jsx'
 import LobbyTransitionScreen from './components/LobbyTransitionScreen.jsx'
 import RoundCompleteScreen from './components/RoundCompleteScreen.jsx'
+import RoundResultScreen from './components/RoundResultScreen.jsx'
+import RoundVoteScreen from './components/RoundVoteScreen.jsx'
 import WinnerRevealScreen from './components/WinnerRevealScreen.jsx'
-import { armEditorMusicAutoplay } from './lib/audioSession.js'
+import {
+  armEditorMusicAutoplay,
+  armInterfaceSounds,
+  playRoomActivitySound,
+} from './lib/audioSession.js'
 import { firebaseEnabled } from './lib/firebaseConfig.js'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from './lib/roomSettings.js'
 import { createRoundSession } from './lib/roundSession.js'
@@ -20,7 +26,15 @@ const EditorScreen = lazy(() => import('./components/EditorScreen.jsx'))
 function getInitialRoute() {
   const params = new URLSearchParams(window.location.search)
   const requestedScreen = params.get('screen')
-  const screen = ['identity', 'lobby', 'image-submit', 'image-vote', 'editor'].includes(requestedScreen)
+  const screen = [
+    'identity',
+    'lobby',
+    'image-submit',
+    'image-vote',
+    'editor',
+    'thumb-vote',
+    'round-result',
+  ].includes(requestedScreen)
     ? requestedScreen
     : 'menu'
   return {
@@ -64,11 +78,82 @@ function GameApp() {
   const [submission, setSubmission] = useState({ count: 0, error: '', status: 'idle' })
   const [baseImages, setBaseImages] = useState([])
   const [baseImageVotes, setBaseImageVotes] = useState([])
+  const [roundSubmissions, setRoundSubmissions] = useState([])
+  const [roundVotes, setRoundVotes] = useState([])
+  const [roundOutcome, setRoundOutcome] = useState(null)
+  const [isOpeningGallery, setIsOpeningGallery] = useState(false)
+  const [isVotingBaseImage, setIsVotingBaseImage] = useState(false)
+  const [isVoting, setIsVoting] = useState(false)
+  const [isFinishingVoting, setIsFinishingVoting] = useState(false)
+  const pendingBaseImageVoteRef = useRef(null)
+  const pendingRoundVoteRef = useRef(null)
+  const announcedBaseImageIdsRef = useRef(null)
+  const announcedBaseVoteIdsRef = useRef(null)
+  const announcedRoundVoteIdsRef = useRef(null)
 
   const normalizedCode = roomCode.trim().toUpperCase()
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
 
-  useEffect(() => armEditorMusicAutoplay(), [])
+  useEffect(() => {
+    const disarmEditorMusic = armEditorMusicAutoplay()
+    const disarmInterfaceSounds = armInterfaceSounds()
+
+    return () => {
+      disarmEditorMusic()
+      disarmInterfaceSounds()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (screen !== 'image-submit') {
+      announcedBaseImageIdsRef.current = null
+      return
+    }
+
+    const currentIds = new Set(baseImages.map((image) => image.id))
+    const previousIds = announcedBaseImageIdsRef.current
+    announcedBaseImageIdsRef.current = currentIds
+    if (!previousIds) return
+
+    const hasNewSubmission = [...currentIds].some((id) => !previousIds.has(id))
+    if (hasNewSubmission) {
+      playRoomActivitySound('image', currentIds.size >= Math.max(1, players.length))
+    }
+  }, [baseImages, players.length, screen])
+
+  useEffect(() => {
+    if (screen !== 'image-vote') {
+      announcedBaseVoteIdsRef.current = null
+      return
+    }
+
+    const currentIds = new Set(baseImageVotes.map((vote) => vote.id))
+    const previousIds = announcedBaseVoteIdsRef.current
+    announcedBaseVoteIdsRef.current = currentIds
+    if (!previousIds) return
+
+    const hasNewVote = [...currentIds].some((id) => !previousIds.has(id))
+    if (hasNewVote) {
+      playRoomActivitySound('vote', currentIds.size >= Math.max(1, players.length))
+    }
+  }, [baseImageVotes, players.length, screen])
+
+  useEffect(() => {
+    if (screen !== 'thumb-vote') {
+      announcedRoundVoteIdsRef.current = null
+      return
+    }
+
+    const currentIds = new Set(roundVotes.map((vote) => vote.id))
+    const previousIds = announcedRoundVoteIdsRef.current
+    announcedRoundVoteIdsRef.current = currentIds
+    if (!previousIds) return
+
+    const hasNewVote = [...currentIds].some((id) => !previousIds.has(id))
+    if (hasNewVote) {
+      playRoomActivitySound('vote', currentIds.size >= Math.max(1, players.length))
+    }
+  }, [players.length, roundVotes, screen])
 
   useEffect(() => {
     const synchronizedScreens = [
@@ -77,6 +162,9 @@ function GameApp() {
       'image-submit',
       'image-vote',
       'winner-reveal',
+      'round-complete',
+      'thumb-vote',
+      'round-result',
     ]
     if (!firebaseEnabled || !synchronizedScreens.includes(screen)) return undefined
 
@@ -110,10 +198,22 @@ function GameApp() {
           setScreen((currentScreen) => (
             currentScreen === 'image-vote'
               ? 'winner-reveal'
-              : currentScreen === 'winner-reveal'
+              : ['winner-reveal', 'challenge', 'editor', 'round-complete'].includes(currentScreen)
                 ? currentScreen
                 : 'challenge'
           ))
+        } else if (syncedRoom.status === 'thumb-voting') {
+          setRound((currentRound) => currentRound ?? createRoundSession(room.code, syncedRoom))
+          setIsOpeningGallery(false)
+          setScreen('thumb-vote')
+        } else if (syncedRoom.status === 'round-results') {
+          setRound((currentRound) => currentRound ?? createRoundSession(room.code, syncedRoom))
+          setRoundOutcome({
+            winnerId: syncedRoom.roundWinnerId,
+            winnerImageData: syncedRoom.roundWinnerImageData,
+          })
+          setIsFinishingVoting(false)
+          setScreen('round-result')
         }
       }, (error) => {
         setRoomError(error.message || 'Não foi possível sincronizar a sala.')
@@ -136,16 +236,27 @@ function GameApp() {
 
     import('./lib/roomService.js').then(({ subscribeToBaseImages }) => {
       if (!isActive) return
-      stopListening = subscribeToBaseImages(room.code, setBaseImages, () => {
-        setRoomError('Não foi possível acompanhar as imagens da sala.')
-      })
+      stopListening = subscribeToBaseImages(
+        room.code,
+        (syncedImages) => setBaseImages((currentImages) => {
+          const currentOwnImage = currentImages.find((image) => image.id === player.id)
+          const ownImageIsSynced = syncedImages.some((image) => image.id === player.id)
+
+          return currentOwnImage && !ownImageIsSynced
+            ? [...syncedImages, currentOwnImage]
+            : syncedImages
+        }),
+        () => {
+          setRoomError('Não foi possível acompanhar as imagens da sala.')
+        },
+      )
     })
 
     return () => {
       isActive = false
       stopListening()
     }
-  }, [room.code, screen])
+  }, [player.id, room.code, screen])
 
   useEffect(() => {
     if (!firebaseEnabled || screen !== 'image-vote') return undefined
@@ -155,19 +266,33 @@ function GameApp() {
 
     import('./lib/roomService.js').then(({ subscribeToBaseImageVotes }) => {
       if (!isActive) return
-      stopListening = subscribeToBaseImageVotes(room.code, setBaseImageVotes, () => {
-        setRoomError('Não foi possível acompanhar os votos da sala.')
-      })
+      stopListening = subscribeToBaseImageVotes(
+        room.code,
+        (syncedVotes) => {
+          const pendingImageId = pendingBaseImageVoteRef.current
+          setBaseImageVotes(pendingImageId
+            ? [
+                ...syncedVotes.filter((vote) => vote.id !== player.id),
+                { id: player.id, imageId: pendingImageId },
+              ]
+            : syncedVotes)
+        },
+        () => {
+          setRoomError('Não foi possível acompanhar os votos da sala.')
+        },
+      )
     })
 
     return () => {
       isActive = false
       stopListening()
     }
-  }, [room.code, screen])
+  }, [player.id, room.code, screen])
 
   useEffect(() => {
-    if (!firebaseEnabled || screen !== 'round-complete' || !round) return undefined
+    if (!firebaseEnabled || !['round-complete', 'thumb-vote', 'round-result'].includes(screen) || !round) {
+      return undefined
+    }
 
     let isActive = true
     let stopListening = () => {}
@@ -178,7 +303,10 @@ function GameApp() {
       stopListening = subscribeToRoundSubmissions(
         room.code,
         round.number,
-        (count) => setSubmission((current) => ({ ...current, count })),
+        (submissions) => {
+          setRoundSubmissions(submissions)
+          setSubmission((current) => ({ ...current, count: submissions.length }))
+        },
         () => setSubmission((current) => ({
           ...current,
           error: current.error || 'Não foi possível acompanhar os envios da sala.',
@@ -199,6 +327,68 @@ function GameApp() {
     }
   }, [room.code, round, screen])
 
+  useEffect(() => {
+    if (!firebaseEnabled || !['thumb-vote', 'round-result'].includes(screen) || !round) {
+      return undefined
+    }
+
+    let isActive = true
+    let stopListening = () => {}
+
+    import('./lib/submissionService.js').then(({ subscribeToRoundVotes }) => {
+      if (!isActive) return
+      stopListening = subscribeToRoundVotes(room.code, round.number, (syncedVotes) => {
+        const pendingSubmissionIds = pendingRoundVoteRef.current
+        setRoundVotes(pendingSubmissionIds
+          ? [
+              ...syncedVotes.filter((vote) => vote.id !== player.id),
+              { id: player.id, submissionIds: pendingSubmissionIds },
+            ]
+          : syncedVotes)
+      }, () => setRoomError('Não foi possível acompanhar os votos da rodada.'))
+    })
+
+    return () => {
+      isActive = false
+      stopListening()
+    }
+  }, [player.id, room.code, round, screen])
+
+  useEffect(() => {
+    const totalPlayers = Math.max(1, players.length)
+    const canOpenGallery = screen === 'round-complete'
+      && room.isHost
+      && submission.status === 'submitted'
+      && submission.count >= totalPlayers
+      && !isOpeningGallery
+
+    if (!canOpenGallery) return undefined
+
+    const timeout = window.setTimeout(async () => {
+      setIsOpeningGallery(true)
+      setRoomError('')
+
+      try {
+        if (firebaseEnabled) {
+          const { startRoundVoting } = await import('./lib/submissionService.js')
+          await startRoundVoting(room.code)
+        } else {
+          setScreen('thumb-vote')
+          setIsOpeningGallery(false)
+        }
+      } catch (error) {
+        setIsOpeningGallery(false)
+        setSubmission((current) => ({
+          ...current,
+          error: error.message || 'Não foi possível abrir a galeria.',
+          status: 'error',
+        }))
+      }
+    }, 1400)
+
+    return () => window.clearTimeout(timeout)
+  }, [isOpeningGallery, players.length, room.code, room.isHost, screen, submission.count, submission.status])
+
   function openIdentity(nextRoom) {
     setRoom(nextRoom)
     setPlayer(loadRoomIdentity(nextRoom.code))
@@ -208,6 +398,18 @@ function GameApp() {
     setSubmission({ count: 0, error: '', status: 'idle' })
     setBaseImages([])
     setBaseImageVotes([])
+    setRoundSubmissions([])
+    setRoundVotes([])
+    setRoundOutcome(null)
+    setIsOpeningGallery(false)
+    setIsVotingBaseImage(false)
+    setIsVoting(false)
+    setIsFinishingVoting(false)
+    pendingBaseImageVoteRef.current = null
+    pendingRoundVoteRef.current = null
+    announcedBaseImageIdsRef.current = null
+    announcedBaseVoteIdsRef.current = null
+    announcedRoundVoteIdsRef.current = null
     setRoomSettings(DEFAULT_ROOM_SETTINGS)
     setRoomError('')
     setScreen('identity')
@@ -291,7 +493,11 @@ function GameApp() {
 
     if (firebaseEnabled) {
       const { submitBaseImage } = await import('./lib/roomService.js')
-      await submitBaseImage(room.code, imageData)
+      const submittedImage = await submitBaseImage(room.code, imageData)
+      setBaseImages((currentImages) => [
+        ...currentImages.filter((image) => image.id !== submittedImage.id),
+        submittedImage,
+      ])
       return
     }
 
@@ -314,17 +520,28 @@ function GameApp() {
   }
 
   async function handleBaseImageVote(imageId) {
+    if (isVotingBaseImage) return
+
+    const previousVotes = baseImageVotes
+    pendingBaseImageVoteRef.current = imageId
+    setIsVotingBaseImage(true)
+    setBaseImageVotes((currentVotes) => [
+      ...currentVotes.filter((vote) => vote.id !== player.id),
+      { id: player.id, imageId },
+    ])
     setRoomError('')
 
     try {
       if (firebaseEnabled) {
         const { voteForBaseImage } = await import('./lib/roomService.js')
         await voteForBaseImage(room.code, imageId)
-      } else {
-        setBaseImageVotes([{ id: player.id, imageId }])
       }
     } catch (error) {
+      setBaseImageVotes(previousVotes)
       setRoomError(error.message || 'Não foi possível registrar seu voto.')
+    } finally {
+      pendingBaseImageVoteRef.current = null
+      setIsVotingBaseImage(false)
     }
   }
 
@@ -378,6 +595,12 @@ function GameApp() {
       if (firebaseEnabled) {
         const { submitRoundImage } = await import('./lib/submissionService.js')
         await submitRoundImage(room.code, round.number, result.imageDataUrl)
+      } else {
+        setRoundSubmissions([{
+          id: player.id,
+          imageData: result.imageDataUrl,
+          submittedAt: new Date(),
+        }])
       }
 
       setSubmission((current) => ({
@@ -401,6 +624,69 @@ function GameApp() {
     setSubmission({ count: 0, error: '', status: 'uploading' })
     setScreen('round-complete')
     uploadRoundResult(result)
+  }
+
+  async function handleRoundVote(submissionId, selectedIds, voteLimit) {
+    let nextSelection
+
+    if (selectedIds.includes(submissionId)) {
+      if (selectedIds.length === 1) return
+      nextSelection = selectedIds.filter((id) => id !== submissionId)
+    } else if (voteLimit === 1) {
+      nextSelection = [submissionId]
+    } else if (selectedIds.length < voteLimit) {
+      nextSelection = [...selectedIds, submissionId]
+    } else {
+      return
+    }
+
+    setIsVoting(true)
+    const previousVotes = roundVotes
+    pendingRoundVoteRef.current = nextSelection
+    setRoundVotes((currentVotes) => [
+      ...currentVotes.filter((vote) => vote.id !== player.id),
+      { id: player.id, submissionIds: nextSelection },
+    ])
+    setRoomError('')
+
+    try {
+      if (firebaseEnabled) {
+        const { submitRoundVote } = await import('./lib/submissionService.js')
+        await submitRoundVote(room.code, round.number, nextSelection)
+      }
+    } catch (error) {
+      setRoundVotes(previousVotes)
+      setRoomError(error.message || 'Não foi possível registrar seus votos.')
+    } finally {
+      pendingRoundVoteRef.current = null
+      setIsVoting(false)
+    }
+  }
+
+  async function handleFinishRoundVoting() {
+    setIsFinishingVoting(true)
+    setRoomError('')
+
+    try {
+      if (firebaseEnabled) {
+        const { finishRoundVoting } = await import('./lib/submissionService.js')
+        await finishRoundVoting(room.code, round.number)
+      } else {
+        const totals = new Map(roundSubmissions.map((item) => [item.id, 0]))
+        roundVotes.forEach((vote) => vote.submissionIds?.forEach((id) => {
+          if (totals.has(id)) totals.set(id, totals.get(id) + 1)
+        }))
+        const winner = [...roundSubmissions].sort((first, second) => (
+          totals.get(second.id) - totals.get(first.id) || first.id.localeCompare(second.id)
+        ))[0]
+        setRoundOutcome({ winnerId: winner.id, winnerImageData: winner.imageData })
+        setScreen('round-result')
+        setIsFinishingVoting(false)
+      }
+    } catch (error) {
+      setRoomError(error.message || 'Não foi possível concluir a votação.')
+      setIsFinishingVoting(false)
+    }
   }
 
   if (screen === 'lobby-transition') {
@@ -434,6 +720,7 @@ function GameApp() {
         connectionError={roomError}
         images={baseImages}
         isHost={room.isHost}
+        isVoting={isVotingBaseImage}
         playerId={player.id}
         roomCode={room.code}
         totalPlayers={Math.max(1, players.length)}
@@ -468,6 +755,7 @@ function GameApp() {
     return (
       <RoundCompleteScreen
         imageDataUrl={roundResult.imageDataUrl}
+        isOpeningGallery={isOpeningGallery}
         reason={roundResult.reason}
         roomCode={room.code}
         round={round}
@@ -475,6 +763,39 @@ function GameApp() {
         totalPlayers={Math.max(1, players.length)}
         onLeave={() => setScreen('menu')}
         onRetry={() => uploadRoundResult(roundResult)}
+      />
+    )
+  }
+
+  if (screen === 'thumb-vote' && round) {
+    return (
+      <RoundVoteScreen
+        connectionError={roomError}
+        isFinishing={isFinishingVoting}
+        isHost={room.isHost}
+        isVoting={isVoting}
+        playerId={player.id}
+        roomCode={room.code}
+        round={round}
+        submissions={roundSubmissions}
+        totalPlayers={Math.max(1, players.length)}
+        votes={roundVotes}
+        onFinishVoting={handleFinishRoundVoting}
+        onVote={handleRoundVote}
+      />
+    )
+  }
+
+  if (screen === 'round-result' && round) {
+    return (
+      <RoundResultScreen
+        outcome={roundOutcome}
+        players={players.length ? players : [player]}
+        roomCode={room.code}
+        round={round}
+        submissions={roundSubmissions}
+        votes={roundVotes}
+        onLeave={() => setScreen('menu')}
       />
     )
   }

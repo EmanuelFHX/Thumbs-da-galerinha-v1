@@ -4,6 +4,7 @@ function BaseImageVoteScreen({
   connectionError,
   images,
   isHost,
+  isVoting,
   onFinishVoting,
   onVote,
   playerId,
@@ -32,23 +33,38 @@ function BaseImageVoteScreen({
           <p>Os autores ficam escondidos. Escolha a imagem com mais potencial para o caos.</p>
         </div>
 
-        <div className="candidate-grid">
-          {images.map((image, index) => (
-            <button
-              className={`candidate-card${ownVote === image.id ? ' is-selected' : ''}`}
-              type="button"
-              key={image.id}
-              aria-pressed={ownVote === image.id}
-              onClick={() => onVote(image.id)}
-            >
-              <span className="candidate-number">#{index + 1}</span>
-              <img src={image.imageData} alt={`Imagem candidata ${index + 1}`} />
-              <span className="candidate-action">
-                <i className={`bi ${ownVote === image.id ? 'bi-check-circle-fill' : 'bi-hand-thumbs-up'}`} aria-hidden="true" />
-                {ownVote === image.id ? 'Seu voto' : 'Votar nessa'}
-              </span>
-            </button>
-          ))}
+        <div className="image-vote-stage">
+          <div className="vote-stage-valance" aria-hidden="true" />
+          <div className="vote-stage-curtain vote-stage-curtain-left" aria-hidden="true" />
+          <div className="vote-stage-curtain vote-stage-curtain-right" aria-hidden="true" />
+          <div className="vote-stage-spotlight vote-stage-spotlight-left" aria-hidden="true" />
+          <div className="vote-stage-spotlight vote-stage-spotlight-right" aria-hidden="true" />
+
+          <div className="candidate-grid">
+            {images.map((image, index) => (
+              <button
+                className={`candidate-card${ownVote === image.id ? ' is-selected' : ''}`}
+                type="button"
+                key={image.id}
+                aria-pressed={ownVote === image.id}
+                disabled={isVoting}
+                onClick={() => onVote(image.id)}
+              >
+                <span className="candidate-number">#{index + 1}</span>
+                <img
+                  src={image.imageData}
+                  alt={`Imagem candidata ${index + 1}`}
+                  draggable="false"
+                />
+                <span className="candidate-action">
+                  <i className={`bi ${ownVote === image.id ? 'bi-check-circle-fill' : 'bi-hand-thumbs-up'}`} aria-hidden="true" />
+                  {ownVote === image.id ? 'Seu voto' : 'Votar nessa'}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="vote-stage-floor" aria-hidden="true" />
         </div>
 
         <div className="vote-footer">
