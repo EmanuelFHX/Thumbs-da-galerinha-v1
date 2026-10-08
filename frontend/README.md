@@ -1,6 +1,6 @@
 # Frontend — Thumbs da Galerinha
 
-Aplicação web do jogo, construída com React, JavaScript, Vite, Konva e Bootstrap Icons.
+Aplicação web do jogo, construída com React, JavaScript, Vite, Konva, Firebase e Bootstrap Icons.
 
 ## Comandos
 
@@ -17,6 +17,8 @@ npm run build
 - `src/game.css`: identidade Cartoon Doodle e layout responsivo.
 - `src/components/EditorScreen.jsx`: canvas interativo e histórico de edição.
 - `src/components/editor.css`: estrutura visual do editor.
+- `src/lib/roomService.js`: criação, entrada e sincronização das salas online.
+- `src/lib/firebase.js`: inicialização opcional do Firebase por variáveis de ambiente.
 - `public/favicon-game.svg`: ícone inicial do projeto.
 - `public/sample-base.svg`: imagem-base local usada no protótipo.
 
@@ -36,6 +38,20 @@ npm run build
 - Recorte livre de imagens com prévia ao vivo, aplicar e cancelar.
 - Rascunho automático no IndexedDB, restauração da sessão e proteção de saída.
 - Exclusão, desfazer, refazer e exportação PNG.
+
+## Multiplayer
+
+O lobby suporta até 8 jogadores. Quando o Firebase está configurado, criação de sala,
+entrada por código, usernames exclusivos e início da partida são sincronizados pelo
+Cloud Firestore. Sem configuração, o frontend mantém o modo local para desenvolvimento.
+
+1. Crie um projeto e um aplicativo web no Firebase.
+2. Ative o provedor anônimo em **Authentication → Sign-in method**.
+3. Crie um banco Cloud Firestore.
+4. Copie `.env.example` para `.env.local` e preencha as variáveis do aplicativo web.
+5. Configure regras restritivas do Firestore antes de disponibilizar o jogo publicamente.
+
+As regras e o deploy da infraestrutura devem ser trabalhados na branch `backend`.
 
 ## Atalhos
 

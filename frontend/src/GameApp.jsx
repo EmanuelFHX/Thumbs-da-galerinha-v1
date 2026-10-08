@@ -1,6 +1,7 @@
-import { lazy, Suspense, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import IdentityScreen from './components/IdentityScreen.jsx'
 import LobbyScreen from './components/LobbyScreen.jsx'
+import { firebaseEnabled } from './lib/firebaseConfig.js'
 import './game.css'
 
 const ROOM_CODE_LENGTH = 6
@@ -43,13 +44,50 @@ function GameApp() {
   const [room, setRoom] = useState(initialRoute.room)
   const [player, setPlayer] = useState(() => loadRoomIdentity(initialRoute.room.code))
   const [roomCode, setRoomCode] = useState('')
+  const [players, setPlayers] = useState([])
+  const [roomError, setRoomError] = useState('')
+  const [isSubmittingIdentity, setIsSubmittingIdentity] = useState(false)
+  const [isStartingRoom, setIsStartingRoom] = useState(false)
 
   const normalizedCode = roomCode.trim().toUpperCase()
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
 
+  useEffect(() => {
+    if (!firebaseEnabled || screen !== 'lobby') return undefined
+
+    let isActive = true
+    let stopListening = () => {}
+
+    import('./lib/roomService.js').then(({ subscribeToRoom }) => {
+      if (!isActive) return
+
+      stopListening = subscribeToRoom(room.code, ({ players: syncedPlayers, room: syncedRoom }) => {
+        setPlayers(syncedPlayers)
+        setRoomError('')
+        setRoom((currentRoom) => ({
+          ...currentRoom,
+          isHost: syncedRoom.hostId === player.id,
+        }))
+
+        if (syncedRoom.status === 'editing') setScreen('editor')
+      }, (error) => {
+        setRoomError(error.message || 'Não foi possível sincronizar a sala.')
+      })
+    }).catch(() => {
+      if (isActive) setRoomError('Não foi possível carregar a conexão com a sala.')
+    })
+
+    return () => {
+      isActive = false
+      stopListening()
+    }
+  }, [player.id, room.code, screen])
+
   function openIdentity(nextRoom) {
     setRoom(nextRoom)
     setPlayer(loadRoomIdentity(nextRoom.code))
+    setPlayers([])
+    setRoomError('')
     setScreen('identity')
   }
 
@@ -72,22 +110,67 @@ function GameApp() {
     setRoomCode(nextCode)
   }
 
-  function handleIdentity(identity) {
-    const nextPlayer = {
-      ...identity,
-      id: player.id ?? crypto.randomUUID(),
-      roomCode: room.code,
+  async function handleIdentity(identity) {
+    if (identity.username.length < 2) {
+      setRoomError('Escolha um username com pelo menos 2 caracteres.')
+      return
     }
-    localStorage.setItem(`thumbs:identity:${room.code}`, JSON.stringify(nextPlayer))
-    setPlayer(nextPlayer)
-    setScreen('lobby')
+
+    setIsSubmittingIdentity(true)
+    setRoomError('')
+
+    try {
+      const syncedPlayer = firebaseEnabled
+        ? await import('./lib/roomService.js').then((service) => (
+            room.isHost
+              ? service.createRoom(room.code, identity)
+              : service.joinRoom(room.code, identity)
+          ))
+        : { ...identity, id: player.id ?? crypto.randomUUID(), isHost: room.isHost }
+      const nextPlayer = { ...syncedPlayer, roomCode: room.code }
+
+      try {
+        localStorage.setItem(`thumbs:identity:${room.code}`, JSON.stringify(nextPlayer))
+      } catch {
+        // A sala continua acessível mesmo quando o navegador bloqueia o armazenamento local.
+      }
+
+      setPlayer(nextPlayer)
+      setPlayers([nextPlayer])
+      setRoom((currentRoom) => ({ ...currentRoom, isHost: nextPlayer.isHost }))
+      setScreen('lobby')
+    } catch (error) {
+      setRoomError(error.message || 'Não foi possível entrar na sala. Tente novamente.')
+    } finally {
+      setIsSubmittingIdentity(false)
+    }
+  }
+
+  async function handleStartRoom() {
+    setIsStartingRoom(true)
+    setRoomError('')
+
+    try {
+      if (firebaseEnabled) {
+        const { startRoom } = await import('./lib/roomService.js')
+        await startRoom(room.code)
+      } else {
+        setScreen('editor')
+      }
+    } catch (error) {
+      setRoomError(error.message || 'Não foi possível iniciar a partida.')
+    } finally {
+      setIsStartingRoom(false)
+    }
   }
 
   if (screen === 'identity') {
     return (
       <IdentityScreen
+        error={roomError}
         initialUsername={player}
         isHost={room.isHost}
+        isSubmitting={isSubmittingIdentity}
         roomCode={room.code}
         onBack={() => setScreen('menu')}
         onContinue={handleIdentity}
@@ -98,11 +181,15 @@ function GameApp() {
   if (screen === 'lobby') {
     return (
       <LobbyScreen
+        connectionError={roomError}
         isHost={room.isHost}
+        isOnline={firebaseEnabled}
+        isStarting={isStartingRoom}
         player={player.username ? player : { avatarId: 'cool', username: 'Visitante' }}
+        players={players}
         roomCode={room.code}
         onBack={() => setScreen('identity')}
-        onStart={() => setScreen('editor')}
+        onStart={handleStartRoom}
       />
     )
   }

@@ -75,6 +75,10 @@
   letter-spacing: 0.12em;
 }
 
+.lobby-status.is-online {
+  background: var(--green);
+}
+
 .identity-layout,
 .lobby-layout {
   width: min(1060px, 100%);
@@ -318,6 +322,32 @@
   box-shadow: 6px 6px 0 var(--ink);
 }
 
+.session-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 2px solid var(--ink);
+  border-radius: 5px;
+  color: var(--ink);
+  background: #ffd9df;
+  font-size: 0.72rem;
+  font-weight: 850;
+  line-height: 1.4;
+  box-shadow: 3px 3px 0 var(--ink);
+}
+
+.is-spinning {
+  animation: session-spin 0.8s linear infinite;
+}
+
+@keyframes session-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .lobby-layout {
   padding-block: 48px 30px;
 }
@@ -514,8 +544,12 @@
   background: var(--yellow);
 }
 
-.session-primary.is-ready,
 .session-primary:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.session-primary.is-ready:disabled {
   background: var(--green);
   cursor: default;
   opacity: 1;

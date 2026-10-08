@@ -1,7 +1,11 @@
 import { PlayerAvatar } from './PlayerAvatar.jsx'
+import { MAX_ROOM_PLAYERS } from '../lib/roomConstants.js'
 import './session.css'
 
-function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
+function LobbyScreen({ connectionError, isHost, isOnline, isStarting, onBack, onStart, player, players, roomCode }) {
+  const roomPlayers = players.length ? players : [{ ...player, isHost }]
+  const emptySlots = Math.max(0, MAX_ROOM_PLAYERS - roomPlayers.length)
+
   function copyRoomCode() {
     navigator.clipboard?.writeText(roomCode)
   }
@@ -13,7 +17,10 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
         <button className="session-back" type="button" onClick={onBack}>
           <i className="bi bi-pencil" aria-hidden="true" /> Editar perfil
         </button>
-        <span className="lobby-status"><i className="bi bi-wifi" aria-hidden="true" /> Lobby local</span>
+        <span className={`lobby-status ${isOnline ? 'is-online' : ''}`}>
+          <i className={`bi ${isOnline ? 'bi-wifi' : 'bi-laptop'}`} aria-hidden="true" />
+          {isOnline ? 'Lobby online' : 'Modo local'}
+        </span>
       </header>
 
       <section className="lobby-layout" aria-labelledby="lobby-title">
@@ -33,18 +40,20 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
           <section className="players-board" aria-labelledby="players-title">
             <div className="board-heading">
               <h2 id="players-title">Jogadores</h2>
-              <span>1/8</span>
+              <span>{roomPlayers.length}/{MAX_ROOM_PLAYERS}</span>
             </div>
             <div className="players-grid">
-              <article className="player-card is-ready">
-                <PlayerAvatar avatarId={player.avatarId} />
-                <div>
-                  <strong>{player.username}</strong>
-                  <span>{isHost ? 'Host da sala' : 'Pronto para jogar'}</span>
-                </div>
-                <i className="bi bi-check-circle-fill" aria-label="Pronto" />
-              </article>
-              {[1, 2, 3].map((slot) => (
+              {roomPlayers.map((roomPlayer) => (
+                <article className="player-card is-ready" key={roomPlayer.id ?? roomPlayer.username}>
+                  <PlayerAvatar avatarId={roomPlayer.avatarId} />
+                  <div>
+                    <strong>{roomPlayer.username}</strong>
+                    <span>{roomPlayer.isHost ? 'Host da sala' : 'Pronto para jogar'}</span>
+                  </div>
+                  <i className="bi bi-check-circle-fill" aria-label="Pronto" />
+                </article>
+              ))}
+              {Array.from({ length: emptySlots }, (_, index) => index + 1).map((slot) => (
                 <article className="player-card is-empty" key={slot}>
                   <span className="empty-avatar"><i className="bi bi-person" aria-hidden="true" /></span>
                   <div>
@@ -66,9 +75,14 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
               <li><i className="bi bi-hand-thumbs-up" aria-hidden="true" /><span><strong>1 voto</strong> por pessoa</span></li>
               <li><i className="bi bi-eye-slash" aria-hidden="true" /><span>Autoria secreta</span></li>
             </ul>
+            {connectionError && (
+              <p className="session-error" role="alert">
+                <i className="bi bi-exclamation-triangle-fill" aria-hidden="true" /> {connectionError}
+              </p>
+            )}
             {isHost ? (
-              <button className="session-primary" type="button" onClick={onStart}>
-                Iniciar partida <i className="bi bi-play-fill" aria-hidden="true" />
+              <button className="session-primary" type="button" onClick={onStart} disabled={isStarting}>
+                {isStarting ? 'Iniciando…' : 'Iniciar partida'} <i className="bi bi-play-fill" aria-hidden="true" />
               </button>
             ) : (
               <button className="session-primary is-ready" type="button" disabled>
