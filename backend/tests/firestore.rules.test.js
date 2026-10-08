@@ -22,12 +22,20 @@ const ROOM_CODE = 'ABC234'
 const rulesPath = fileURLToPath(new URL('../firestore.rules', import.meta.url))
 let testEnvironment
 
+const DEFAULT_SETTINGS = {
+  editDurationSeconds: 240,
+  mode: 'classic',
+  rounds: 3,
+  votesPerPlayer: 1,
+}
+
 function roomData(hostId, playerCount = 1) {
   return {
     createdAt: new Date(),
     hostId,
     maxPlayers: 8,
     playerCount,
+    settings: DEFAULT_SETTINGS,
     status: 'lobby',
     updatedAt: new Date(),
   }
@@ -74,6 +82,7 @@ async function createRoomAs(userId, roomCode = ROOM_CODE, username = 'Host') {
       hostId: userId,
       maxPlayers: 8,
       playerCount: 1,
+      settings: DEFAULT_SETTINGS,
       status: 'lobby',
       updatedAt: serverTimestamp(),
     })
@@ -182,11 +191,112 @@ describe('regras de salas', () => {
     const roomRefForHost = doc(hostDatabase, 'rooms', ROOM_CODE)
 
     await assertFails(updateDoc(roomRefForGuest, {
-      status: 'editing',
+      status: 'image-submission',
       updatedAt: serverTimestamp(),
     }))
     await assertSucceeds(updateDoc(roomRefForHost, {
+      status: 'image-submission',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('cada jogador envia somente a própria imagem-base durante a coleta', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'image-submission' })
+    })
+
+    const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
+    const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
+    const imageData = {
+      imageData: 'data:image/webp;base64,UklGRg==',
+      submittedAt: serverTimestamp(),
+    }
+
+    await assertSucceeds(setDoc(
+      doc(hostDatabase, 'rooms', ROOM_CODE, 'baseImages', 'host'),
+      imageData,
+    ))
+    await assertFails(setDoc(
+      doc(guestDatabase, 'rooms', ROOM_CODE, 'baseImages', 'host'),
+      imageData,
+    ))
+  })
+
+  test('registra voto somente em imagem existente durante a votação', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore()
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'image-voting' })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'baseImages', 'host'), {
+        imageData: 'data:image/webp;base64,UklGRg==',
+        submittedAt: new Date(),
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const voteRef = doc(database, 'rooms', ROOM_CODE, 'baseImageVotes', 'host')
+
+    await assertSucceeds(setDoc(voteRef, {
+      imageId: 'host',
+      votedAt: serverTimestamp(),
+    }))
+    await assertFails(setDoc(voteRef, {
+      imageId: 'missing',
+      votedAt: serverTimestamp(),
+    }))
+  })
+
+  test('host inicia a edição somente com os dados da imagem vencedora', async () => {
+    await seedRoom()
+    const imageData = 'data:image/webp;base64,UklGRg=='
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore()
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'image-voting' })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'baseImages', 'host'), {
+        imageData,
+        submittedAt: new Date(),
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const roomRef = doc(database, 'rooms', ROOM_CODE)
+
+    await assertFails(updateDoc(roomRef, {
+      selectedImageData: 'data:image/webp;base64,alterada',
+      selectedImageId: 'host',
       status: 'editing',
+      updatedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(updateDoc(roomRef, {
+      selectedImageData: imageData,
+      selectedImageId: 'host',
+      status: 'editing',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('somente o host pode alterar configurações válidas no lobby', async () => {
+    await seedRoom()
+    const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
+    const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
+
+    await assertFails(updateDoc(doc(guestDatabase, 'rooms', ROOM_CODE), {
+      settings: { ...DEFAULT_SETTINGS, rounds: 5 },
+      updatedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(updateDoc(doc(hostDatabase, 'rooms', ROOM_CODE), {
+      settings: { ...DEFAULT_SETTINGS, rounds: 5 },
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('bloqueia configurações fora das opções permitidas', async () => {
+    await seedRoom()
+    const database = testEnvironment.authenticatedContext('host').firestore()
+
+    await assertFails(updateDoc(doc(database, 'rooms', ROOM_CODE), {
+      settings: { ...DEFAULT_SETTINGS, editDurationSeconds: 15 },
       updatedAt: serverTimestamp(),
     }))
   })
@@ -199,5 +309,55 @@ describe('regras de salas', () => {
     const database = testEnvironment.authenticatedContext('guest').firestore()
     const snapshot = await getDocs(collection(database, 'rooms', ROOM_CODE, 'players'))
     assert.equal(snapshot.size, 2)
+  })
+
+  test('registra somente a submissão do próprio jogador durante a edição', async () => {
+    await seedRoom()
+    const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
+    const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
+    const submissionData = {
+      imageData: 'data:image/webp;base64,UklGRg==',
+      submittedAt: serverTimestamp(),
+    }
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+    })
+
+    await assertSucceeds(setDoc(
+      doc(hostDatabase, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'),
+      submissionData,
+    ))
+    await assertFails(setDoc(
+      doc(guestDatabase, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'),
+      submissionData,
+    ))
+  })
+
+  test('bloqueia thumbs em formato inválido ou acima do limite', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const submissionRef = doc(
+      database,
+      'rooms',
+      ROOM_CODE,
+      'rounds',
+      '1',
+      'submissions',
+      'host',
+    )
+
+    await assertFails(setDoc(submissionRef, {
+      imageData: 'data:image/png;base64,iVBORw0KGgo=',
+      submittedAt: serverTimestamp(),
+    }))
+    await assertFails(setDoc(submissionRef, {
+      imageData: `data:image/webp;base64,${'A'.repeat(900001)}`,
+      submittedAt: serverTimestamp(),
+    }))
   })
 })
