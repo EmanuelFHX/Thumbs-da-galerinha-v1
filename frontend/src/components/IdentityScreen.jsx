@@ -3,7 +3,7 @@ import { AVATARS } from './avatarOptions.js'
 import { PlayerAvatar } from './PlayerAvatar.jsx'
 import './session.css'
 
-function IdentityScreen({ initialUsername, isHost, onBack, onContinue, roomCode }) {
+function IdentityScreen({ error, initialUsername, isHost, isSubmitting, onBack, onContinue, roomCode }) {
   const [selectedAvatar, setSelectedAvatar] = useState(initialUsername.avatarId ?? AVATARS[0].id)
   const [username, setUsername] = useState(initialUsername.username ?? '')
 
@@ -83,8 +83,18 @@ function IdentityScreen({ initialUsername, isHost, onBack, onContinue, roomCode 
             </div>
           </fieldset>
 
-          <button className="session-primary" type="submit">
-            Entrar na sala <i className="bi bi-arrow-right" aria-hidden="true" />
+          {error && (
+            <p className="session-error" role="alert">
+              <i className="bi bi-exclamation-triangle-fill" aria-hidden="true" /> {error}
+            </p>
+          )}
+
+          <button className="session-primary" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? (
+              <><i className="bi bi-arrow-repeat is-spinning" aria-hidden="true" /> Entrando…</>
+            ) : (
+              <>Entrar na sala <i className="bi bi-arrow-right" aria-hidden="true" /></>
+            )}
           </button>
         </form>
       </section>

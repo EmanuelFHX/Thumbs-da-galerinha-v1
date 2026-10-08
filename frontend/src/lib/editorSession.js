@@ -1,7 +1,7 @@
 const DATABASE_NAME = 'thumbs-da-galerinha'
 const DATABASE_VERSION = 1
 const STORE_NAME = 'editor-sessions'
-const SESSION_KEY = 'local-prototype'
+const DEFAULT_SESSION_KEY = 'local-prototype'
 
 function openDatabase() {
   return new Promise((resolve, reject) => {
@@ -34,21 +34,21 @@ function runTransaction(mode, action) {
   }))
 }
 
-export function loadEditorSession() {
-  return runTransaction('readonly', (store) => store.get(SESSION_KEY))
+export function loadEditorSession(sessionKey = DEFAULT_SESSION_KEY) {
+  return runTransaction('readonly', (store) => store.get(sessionKey))
 }
 
-export async function saveEditorSession(session) {
+export async function saveEditorSession(session, sessionKey = DEFAULT_SESSION_KEY) {
   const savedAt = new Date().toISOString()
   await runTransaction('readwrite', (store) => store.put({
     ...session,
-    id: SESSION_KEY,
+    id: sessionKey,
     schemaVersion: 1,
     savedAt,
   }))
   return savedAt
 }
 
-export function clearEditorSession() {
-  return runTransaction('readwrite', (store) => store.delete(SESSION_KEY))
+export function clearEditorSession(sessionKey = DEFAULT_SESSION_KEY) {
+  return runTransaction('readwrite', (store) => store.delete(sessionKey))
 }

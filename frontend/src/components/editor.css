@@ -9,7 +9,7 @@
 
 .editor-header {
   display: grid;
-  grid-template-columns: auto minmax(280px, 1fr) auto auto;
+  grid-template-columns: auto minmax(280px, 1fr) auto auto auto;
   align-items: center;
   gap: 18px;
   min-height: 76px;
@@ -97,6 +97,7 @@
 }
 
 .back-button,
+.music-toggle,
 .finish-button,
 .history-bar button,
 .delete-button {
@@ -110,8 +111,38 @@
 }
 
 .back-button,
+.music-toggle,
 .finish-button {
   padding: 10px 14px;
+}
+
+.music-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 40px;
+  font-size: 0.72rem;
+  transition: color 120ms ease, background-color 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.music-toggle i {
+  color: var(--blue-dark);
+  font-size: 1rem;
+}
+
+.music-toggle.is-muted {
+  color: var(--ink-soft);
+  background: #e5dfd3;
+}
+
+.music-toggle.is-muted i {
+  color: var(--ink-soft);
+}
+
+.music-toggle:active {
+  transform: scale(0.96);
+  box-shadow: 1px 1px 0 var(--ink);
 }
 
 .finish-button {
@@ -130,6 +161,24 @@
   text-align: center;
   box-shadow: 4px 4px 0 var(--ink);
   transform: rotate(1deg);
+}
+
+.timer.is-urgent {
+  color: #fff;
+  background: #d93654;
+  animation: timer-pulse 0.8s steps(2, end) infinite;
+}
+
+@keyframes timer-pulse {
+  50% {
+    transform: rotate(-1deg) scale(1.04);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .timer.is-urgent {
+    animation: none;
+  }
 }
 
 .editor-workspace {

@@ -1,7 +1,58 @@
 import { PlayerAvatar } from './PlayerAvatar.jsx'
+import { MAX_ROOM_PLAYERS } from '../lib/roomConstants.js'
+import {
+  EDIT_DURATION_OPTIONS,
+  formatEditDuration,
+  getMode,
+  ROOM_MODES,
+  ROUND_OPTIONS,
+  VOTE_OPTIONS,
+} from '../lib/roomSettings.js'
 import './session.css'
 
-function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
+function ChoiceRow({ formatOption, label, onChange, options, value }) {
+  return (
+    <div className="rule-selector" role="group" aria-label={label}>
+      <span>{label}</span>
+      <div>
+        {options.map((option) => (
+          <button
+            className={value === option ? 'is-selected' : ''}
+            type="button"
+            key={option}
+            aria-pressed={value === option}
+            onClick={() => onChange(option)}
+          >
+            {formatOption(option)}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function LobbyScreen({
+  connectionError,
+  isHost,
+  isOnline,
+  isSavingSettings,
+  isStarting,
+  onBack,
+  onSettingsChange,
+  onStart,
+  player,
+  players,
+  roomCode,
+  settings,
+}) {
+  const roomPlayers = players.length ? players : [{ ...player, isHost }]
+  const emptySlots = Math.max(0, MAX_ROOM_PLAYERS - roomPlayers.length)
+  const selectedMode = getMode(settings.mode)
+
+  function changeSetting(key, value) {
+    onSettingsChange({ ...settings, [key]: value })
+  }
+
   function copyRoomCode() {
     navigator.clipboard?.writeText(roomCode)
   }
@@ -13,7 +64,10 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
         <button className="session-back" type="button" onClick={onBack}>
           <i className="bi bi-pencil" aria-hidden="true" /> Editar perfil
         </button>
-        <span className="lobby-status"><i className="bi bi-wifi" aria-hidden="true" /> Lobby local</span>
+        <span className={`lobby-status ${isOnline ? 'is-online' : ''}`}>
+          <i className={`bi ${isOnline ? 'bi-wifi' : 'bi-laptop'}`} aria-hidden="true" />
+          {isOnline ? 'Lobby online' : 'Modo local'}
+        </span>
       </header>
 
       <section className="lobby-layout" aria-labelledby="lobby-title">
@@ -33,18 +87,20 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
           <section className="players-board" aria-labelledby="players-title">
             <div className="board-heading">
               <h2 id="players-title">Jogadores</h2>
-              <span>1/8</span>
+              <span>{roomPlayers.length}/{MAX_ROOM_PLAYERS}</span>
             </div>
             <div className="players-grid">
-              <article className="player-card is-ready">
-                <PlayerAvatar avatarId={player.avatarId} />
-                <div>
-                  <strong>{player.username}</strong>
-                  <span>{isHost ? 'Host da sala' : 'Pronto para jogar'}</span>
-                </div>
-                <i className="bi bi-check-circle-fill" aria-label="Pronto" />
-              </article>
-              {[1, 2, 3].map((slot) => (
+              {roomPlayers.map((roomPlayer) => (
+                <article className="player-card is-ready" key={roomPlayer.id ?? roomPlayer.username}>
+                  <PlayerAvatar avatarId={roomPlayer.avatarId} />
+                  <div>
+                    <strong>{roomPlayer.username}</strong>
+                    <span>{roomPlayer.isHost ? 'Host da sala' : 'Pronto para jogar'}</span>
+                  </div>
+                  <i className="bi bi-check-circle-fill" aria-label="Pronto" />
+                </article>
+              ))}
+              {Array.from({ length: emptySlots }, (_, index) => index + 1).map((slot) => (
                 <article className="player-card is-empty" key={slot}>
                   <span className="empty-avatar"><i className="bi bi-person" aria-hidden="true" /></span>
                   <div>
@@ -58,17 +114,69 @@ function LobbyScreen({ isHost, onBack, onStart, player, roomCode }) {
 
           <aside className="rules-note">
             <span className="card-tape" aria-hidden="true" />
-            <p className="session-eyebrow">Regras da rodada</p>
-            <h2>Clássico</h2>
-            <ul>
-              <li><i className="bi bi-arrow-repeat" aria-hidden="true" /><span><strong>3</strong> rodadas</span></li>
-              <li><i className="bi bi-stopwatch" aria-hidden="true" /><span><strong>4 min</strong> para editar</span></li>
-              <li><i className="bi bi-hand-thumbs-up" aria-hidden="true" /><span><strong>1 voto</strong> por pessoa</span></li>
-              <li><i className="bi bi-eye-slash" aria-hidden="true" /><span>Autoria secreta</span></li>
-            </ul>
+            <p className="session-eyebrow">Regras da partida</p>
+            <div className="rules-title-row">
+              <h2>{selectedMode.label}</h2>
+              <span className="rules-edit-state">
+                <i className={`bi ${isHost ? 'bi-sliders' : 'bi-lock-fill'}`} aria-hidden="true" />
+                {isHost ? (isSavingSettings ? 'Salvando…' : 'Você edita') : 'Host edita'}
+              </span>
+            </div>
+            <p className="mode-description">{selectedMode.description}</p>
+
+            <fieldset className="room-settings" disabled={!isHost || isSavingSettings}>
+              <legend className="sr-only">Configurações da partida</legend>
+
+              <div className="mode-selector" aria-label="Modo de jogo">
+                {ROOM_MODES.map((mode) => (
+                  <button
+                    className={settings.mode === mode.value ? 'is-selected' : ''}
+                    type="button"
+                    key={mode.value}
+                    aria-label={`${mode.label}: ${mode.description}`}
+                    aria-pressed={settings.mode === mode.value}
+                    onClick={() => changeSetting('mode', mode.value)}
+                  >
+                    <i className={`bi ${mode.icon}`} aria-hidden="true" />
+                    <span>{mode.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              <ChoiceRow
+                label="Rodadas"
+                options={ROUND_OPTIONS}
+                value={settings.rounds}
+                formatOption={(option) => option}
+                onChange={(value) => changeSetting('rounds', value)}
+              />
+              <ChoiceRow
+                label="Tempo para editar"
+                options={EDIT_DURATION_OPTIONS}
+                value={settings.editDurationSeconds}
+                formatOption={formatEditDuration}
+                onChange={(value) => changeSetting('editDurationSeconds', value)}
+              />
+              <ChoiceRow
+                label="Votos por pessoa"
+                options={VOTE_OPTIONS}
+                value={settings.votesPerPlayer}
+                formatOption={(option) => option}
+                onChange={(value) => changeSetting('votesPerPlayer', value)}
+              />
+            </fieldset>
+
+            <p className="secret-author-note">
+              <i className="bi bi-eye-slash" aria-hidden="true" /> Autoria secreta durante a votação
+            </p>
+            {connectionError && (
+              <p className="session-error" role="alert">
+                <i className="bi bi-exclamation-triangle-fill" aria-hidden="true" /> {connectionError}
+              </p>
+            )}
             {isHost ? (
-              <button className="session-primary" type="button" onClick={onStart}>
-                Iniciar partida <i className="bi bi-play-fill" aria-hidden="true" />
+              <button className="session-primary" type="button" onClick={onStart} disabled={isStarting}>
+                {isStarting ? 'Iniciando…' : 'Iniciar partida'} <i className="bi bi-play-fill" aria-hidden="true" />
               </button>
             ) : (
               <button className="session-primary is-ready" type="button" disabled>

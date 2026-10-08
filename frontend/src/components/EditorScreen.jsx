@@ -15,6 +15,12 @@ import {
   loadEditorSession,
   saveEditorSession,
 } from '../lib/editorSession.js'
+import {
+  setEditorMusicMuted,
+  startEditorMusic,
+  stopEditorMusic,
+} from '../lib/audioSession.js'
+import { EDIT_DURATION_SECONDS, formatRoundTime } from '../lib/roundSession.js'
 import './editor.css'
 
 const DEFAULT_DOCUMENT_SIZE = { width: 960, height: 540 }
@@ -23,6 +29,16 @@ const MIN_DOCUMENT_HEIGHT = 180
 const MAX_DOCUMENT_SIZE = 1920
 const DEFAULT_COLOR = '#ff5c7a'
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024
+const MAX_SUBMISSION_DATA_LENGTH = 850_000
+const EDITOR_MUSIC_MUTED_KEY = 'thumbs-editor-music-muted'
+const SUBMISSION_CAPTURE_ATTEMPTS = [
+  { pixelRatio: 1, quality: 0.82 },
+  { pixelRatio: 0.85, quality: 0.72 },
+  { pixelRatio: 0.7, quality: 0.62 },
+  { pixelRatio: 0.55, quality: 0.5 },
+  { pixelRatio: 0.4, quality: 0.42 },
+  { pixelRatio: 0.25, quality: 0.35 },
+]
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 2
 const STICKERS = [
@@ -413,7 +429,15 @@ function getSaveLabel(saveStatus, lastSavedAt) {
   })}`
 }
 
-function EditorScreen({ onBack }) {
+function getInitialMusicMuted() {
+  try {
+    return window.sessionStorage.getItem(EDITOR_MUSIC_MUTED_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
+function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, round, sessionKey }) {
   const stageRef = useRef(null)
   const canvasFrameRef = useRef(null)
   const fileInputRef = useRef(null)
@@ -423,8 +447,10 @@ function EditorScreen({ onBack }) {
   const panStart = useRef(null)
   const shortcutActions = useRef(null)
   const hasUnsavedChanges = useRef(false)
+  const hasFinishedRound = useRef(false)
+  const finishRoundRef = useRef(null)
   const saveGeneration = useRef(0)
-  const baseImage = useCanvasImage('/sample-base.svg')
+  const baseImage = useCanvasImage(baseImageSource)
 
   const [tool, setTool] = useState(getInitialTool)
   const [sidePanel, setSidePanel] = useState(getInitialSidePanel)
@@ -450,6 +476,13 @@ function EditorScreen({ onBack }) {
   const [sessionReady, setSessionReady] = useState(false)
   const [saveStatus, setSaveStatus] = useState('loading')
   const [lastSavedAt, setLastSavedAt] = useState(null)
+  const [remainingSeconds, setRemainingSeconds] = useState(() => (
+    round?.endsAt
+      ? Math.max(0, Math.ceil((round.endsAt - Date.now()) / 1000))
+      : EDIT_DURATION_SECONDS
+  ))
+  const [musicMuted, setMusicMuted] = useState(getInitialMusicMuted)
+  const initialMusicMutedRef = useRef(musicMuted)
 
   const selectedElement = elements.find((element) => element.id === selectedId)
   const activeCropDraft = cropDraft?.elementId === selectedId ? cropDraft : null
@@ -481,6 +514,12 @@ function EditorScreen({ onBack }) {
     onBack()
   }
 
+  function toggleMusic() {
+    const nextMuted = !musicMuted
+    setMusicMuted(nextMuted)
+    setEditorMusicMuted(nextMuted).catch(() => setMusicMuted(true))
+  }
+
   async function clearDraft() {
     if (hasPersistableContent && !window.confirm('Limpar todo o rascunho atual? Essa ação não pode ser desfeita.')) {
       return
@@ -502,7 +541,7 @@ function EditorScreen({ onBack }) {
     setEraserSize(34)
 
     try {
-      await clearEditorSession()
+      await clearEditorSession(sessionKey)
       setLastSavedAt(null)
       setSaveStatus('empty')
       setStatus('Rascunho limpo. O editor está pronto para uma nova criação.')
@@ -949,7 +988,7 @@ function EditorScreen({ onBack }) {
   useEffect(() => {
     let cancelled = false
 
-    loadEditorSession()
+    loadEditorSession(sessionKey)
       .then((session) => {
         if (cancelled) return
 
@@ -985,7 +1024,23 @@ function EditorScreen({ onBack }) {
     return () => {
       cancelled = true
     }
+  }, [sessionKey])
+
+  useEffect(() => {
+    if (!initialMusicMutedRef.current) startEditorMusic().catch(() => setMusicMuted(true))
+
+    return () => {
+      stopEditorMusic()
+    }
   }, [])
+
+  useEffect(() => {
+    try {
+      window.sessionStorage.setItem(EDITOR_MUSIC_MUTED_KEY, String(musicMuted))
+    } catch {
+      // O controle continua funcionando mesmo sem persistência na sessão.
+    }
+  }, [musicMuted])
 
   useEffect(() => {
     if (!sessionReady || !hasPersistableContent) return undefined
@@ -1005,7 +1060,7 @@ function EditorScreen({ onBack }) {
             brushSoftness,
             eraserSize,
           },
-        })
+        }, sessionKey)
         if (saveGeneration.current === generation) {
           hasUnsavedChanges.current = false
           setLastSavedAt(savedAt)
@@ -1032,7 +1087,23 @@ function EditorScreen({ onBack }) {
     eraserSize,
     hasPersistableContent,
     sessionReady,
+    sessionKey,
   ])
+
+  useEffect(() => {
+    if (!round?.endsAt) return undefined
+
+    const updateTimer = () => {
+      const nextSeconds = Math.max(0, Math.ceil((round.endsAt - Date.now()) / 1000))
+      setRemainingSeconds(nextSeconds)
+
+      if (nextSeconds === 0) finishRoundRef.current?.('timeout')
+    }
+
+    updateTimer()
+    const interval = window.setInterval(updateTimer, 250)
+    return () => window.clearInterval(interval)
+  }, [round?.endsAt])
 
   useEffect(() => {
     function handleBeforeUnload(event) {
@@ -1301,16 +1372,25 @@ function EditorScreen({ onBack }) {
     setStatus(tool === 'eraser' ? 'Área apagada.' : 'Traço adicionado.')
   }
 
-  function exportImage() {
+  function captureImage({ pixelRatio = 2, mimeType = 'image/png', quality = 1 } = {}) {
     const stage = stageRef.current
+    if (!stage) return null
+
     const transformers = stage.find('Transformer')
     transformers.forEach((transformer) => transformer.visible(false))
     stage.batchDraw()
 
-    const dataUrl = stage.toDataURL({ pixelRatio: 2 })
+    const dataUrl = stage.toDataURL({ mimeType, pixelRatio, quality })
 
     transformers.forEach((transformer) => transformer.visible(true))
     stage.batchDraw()
+    return dataUrl
+  }
+
+  function exportImage() {
+    const dataUrl = captureImage()
+    if (!dataUrl) return
+
     const link = document.createElement('a')
     link.download = 'thumb-da-galerinha.png'
     link.href = dataUrl
@@ -1320,13 +1400,42 @@ function EditorScreen({ onBack }) {
     setStatus('Imagem exportada em PNG.')
   }
 
+  function captureSubmissionImage() {
+    for (const attempt of SUBMISSION_CAPTURE_ATTEMPTS) {
+      const dataUrl = captureImage({ ...attempt, mimeType: 'image/webp' })
+      if (!dataUrl || dataUrl.length <= MAX_SUBMISSION_DATA_LENGTH) return dataUrl
+    }
+
+    setStatus('A thumb ficou grande demais para ser enviada. Remova uma imagem e tente novamente.')
+    return null
+  }
+
+  function finishRound(reason = 'manual') {
+    if (hasFinishedRound.current) return
+
+    if (!onFinish) {
+      exportImage()
+      return
+    }
+
+    const imageDataUrl = captureSubmissionImage()
+    if (!imageDataUrl) return
+
+    hasFinishedRound.current = true
+    onFinish({ imageDataUrl, reason })
+  }
+
+  finishRoundRef.current = finishRound
+
   return (
     <main className="editor-shell">
       <header className="editor-header">
         <button className="back-button" type="button" onClick={handleBack}>← Menu</button>
         <div>
-          <span className="round-label">Rodada de teste</span>
-          <strong>Transforme o passeio em uma aventura impossível</strong>
+          <span className="round-label">
+            {round ? `Rodada ${round.number}/${round.total}` : 'Rodada de teste'}
+          </span>
+          <strong>{round?.challenge ?? 'Transforme o passeio em uma aventura impossível'}</strong>
           <div className="session-status-row">
             <span className={`save-status is-${saveStatus}`} aria-live="polite">
               <i
@@ -1351,9 +1460,24 @@ function EditorScreen({ onBack }) {
             </button>
           </div>
         </div>
-        <div className="timer" aria-label="Quatro minutos restantes">04:00</div>
-        <button className="finish-button" type="button" onClick={exportImage}>
-          Exportar PNG
+        <button
+          className={`music-toggle${musicMuted ? ' is-muted' : ''}`}
+          type="button"
+          onClick={toggleMusic}
+          aria-pressed={musicMuted}
+          title={musicMuted ? 'Ativar música' : 'Silenciar música'}
+        >
+          <i className={`bi ${musicMuted ? 'bi-volume-mute-fill' : 'bi-volume-up-fill'}`} aria-hidden="true" />
+          Música
+        </button>
+        <div
+          className={`timer${remainingSeconds <= 30 ? ' is-urgent' : ''}`}
+          aria-label={`${remainingSeconds} segundos restantes`}
+        >
+          {formatRoundTime(remainingSeconds)}
+        </div>
+        <button className="finish-button" type="button" onClick={() => finishRound('manual')}>
+          {onFinish ? 'Finalizar thumb' : 'Exportar PNG'}
         </button>
       </header>
 
