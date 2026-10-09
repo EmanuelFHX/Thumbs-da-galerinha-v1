@@ -360,4 +360,81 @@ describe('regras de salas', () => {
       submittedAt: serverTimestamp(),
     }))
   })
+
+  test('somente o host abre a galeria de votação das thumbs', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+    })
+
+    const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
+    const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
+
+    await assertFails(updateDoc(doc(guestDatabase, 'rooms', ROOM_CODE), {
+      status: 'thumb-voting',
+      updatedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(updateDoc(doc(hostDatabase, 'rooms', ROOM_CODE), {
+      status: 'thumb-voting',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('permite votar em outras thumbs e bloqueia o voto na própria criação', async () => {
+    await seedRoom('host', 2)
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore()
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'thumb-voting' })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'players', 'guest'), playerData('Convidado'))
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'), {
+        imageData: 'data:image/webp;base64,UklGRg==',
+        submittedAt: new Date(),
+      })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'guest'), {
+        imageData: 'data:image/webp;base64,UklGRg2=',
+        submittedAt: new Date(),
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const voteRef = doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'votes', 'host')
+
+    await assertFails(setDoc(voteRef, {
+      submissionIds: ['host'],
+      votedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(setDoc(voteRef, {
+      submissionIds: ['guest'],
+      votedAt: serverTimestamp(),
+    }))
+  })
+
+  test('host publica somente uma thumb vencedora que exista na rodada', async () => {
+    const imageData = 'data:image/webp;base64,UklGRg=='
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore()
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'thumb-voting' })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'), {
+        imageData,
+        submittedAt: new Date(),
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const roomRef = doc(database, 'rooms', ROOM_CODE)
+
+    await assertFails(updateDoc(roomRef, {
+      roundWinnerId: 'host',
+      roundWinnerImageData: 'data:image/webp;base64,alterada',
+      status: 'round-results',
+      updatedAt: serverTimestamp(),
+    }))
+    await assertSucceeds(updateDoc(roomRef, {
+      roundWinnerId: 'host',
+      roundWinnerImageData: imageData,
+      status: 'round-results',
+      updatedAt: serverTimestamp(),
+    }))
+  })
 })
