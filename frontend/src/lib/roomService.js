@@ -236,6 +236,8 @@ export async function submitBaseImage(roomCode, imageData) {
       submittedAt: serverTimestamp(),
     })
   })
+
+  return { id: user.uid, imageData }
 }
 
 export async function startImageVoting(roomCode) {

@@ -2,6 +2,7 @@ import './session.css'
 
 function RoundCompleteScreen({
   imageDataUrl,
+  isOpeningGallery,
   onLeave,
   onRetry,
   reason,
@@ -53,7 +54,7 @@ function RoundCompleteScreen({
               : hasError
                 ? 'A conexão borrou tudo.'
                 : everyoneSubmitted
-                  ? 'Todo mundo entregou!'
+                  ? 'Abrindo a galeria!'
                   : 'Thumb enviada!'}
           </h1>
 
@@ -77,7 +78,7 @@ function RoundCompleteScreen({
                 {isUploading
                   ? 'Guardando sua criação com cuidado…'
                   : everyoneSubmitted
-                    ? 'As thumbs estão prontas para a galeria.'
+                    ? 'Todo mundo entregou. Preparando a votação anônima…'
                     : 'Esperando o restante da galera terminar.'}
               </p>
             </div>
@@ -91,7 +92,8 @@ function RoundCompleteScreen({
 
           {isSubmitted && !hasError && (
             <span className="waiting-sticker">
-              <i className="bi bi-hourglass-split" aria-hidden="true" /> Aguardando a galera
+              <i className={`bi ${everyoneSubmitted ? 'bi-images' : 'bi-hourglass-split'}`} aria-hidden="true" />
+              {everyoneSubmitted || isOpeningGallery ? 'Montando a galeria' : 'Aguardando a galera'}
             </span>
           )}
 

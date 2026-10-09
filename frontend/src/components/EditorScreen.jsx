@@ -30,7 +30,7 @@ const MAX_DOCUMENT_SIZE = 1920
 const DEFAULT_COLOR = '#ff5c7a'
 const MAX_IMAGE_SIZE = 8 * 1024 * 1024
 const MAX_SUBMISSION_DATA_LENGTH = 850_000
-const EDITOR_MUSIC_MUTED_KEY = 'thumbs-editor-music-muted'
+const EDITOR_MUSIC_MUTED_KEY = 'thumbs-editor-music-muted-v2'
 const SUBMISSION_CAPTURE_ATTEMPTS = [
   { pixelRatio: 1, quality: 0.82 },
   { pixelRatio: 0.85, quality: 0.72 },
@@ -1027,9 +1027,30 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   }, [sessionKey])
 
   useEffect(() => {
-    if (!initialMusicMutedRef.current) startEditorMusic().catch(() => setMusicMuted(true))
+    let retryArmed = false
+
+    function detachRetry() {
+      window.removeEventListener('pointerdown', retryMusic)
+      window.removeEventListener('keydown', retryMusic)
+      retryArmed = false
+    }
+
+    function retryMusic() {
+      startEditorMusic().then(detachRetry).catch(() => {
+        // Uma interação futura poderá tentar iniciar a música novamente.
+      })
+    }
+
+    if (!initialMusicMutedRef.current) {
+      startEditorMusic().catch(() => {
+        retryArmed = true
+        window.addEventListener('pointerdown', retryMusic, { passive: true })
+        window.addEventListener('keydown', retryMusic)
+      })
+    }
 
     return () => {
+      if (retryArmed) detachRetry()
       stopEditorMusic()
     }
   }, [])
