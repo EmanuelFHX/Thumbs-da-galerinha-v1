@@ -9,6 +9,7 @@ import {
 } from '@firebase/rules-unit-testing'
 import {
   collection,
+  deleteField,
   doc,
   getDocs,
   runTransaction,
@@ -46,6 +47,7 @@ function playerData(username, isHost = false) {
     avatarId: 'cool',
     isHost,
     joinedAt: new Date(),
+    lastSeenAt: new Date(),
     ready: true,
     username,
     usernameKey: encodeURIComponent(username.toLocaleLowerCase('pt-BR')),
@@ -90,6 +92,7 @@ async function createRoomAs(userId, roomCode = ROOM_CODE, username = 'Host') {
       avatarId: 'cool',
       isHost: true,
       joinedAt: serverTimestamp(),
+      lastSeenAt: serverTimestamp(),
       ready: true,
       username,
       usernameKey,
@@ -115,6 +118,7 @@ async function joinRoomAs(userId, username) {
       avatarId: 'cool',
       isHost: false,
       joinedAt: serverTimestamp(),
+      lastSeenAt: serverTimestamp(),
       ready: true,
       username,
       usernameKey,
@@ -191,19 +195,83 @@ describe('regras de salas', () => {
     const roomRefForHost = doc(hostDatabase, 'rooms', ROOM_CODE)
 
     await assertFails(updateDoc(roomRefForGuest, {
+      roundNumber: 1,
+      scores: {},
       status: 'image-submission',
       updatedAt: serverTimestamp(),
     }))
     await assertSucceeds(updateDoc(roomRefForHost, {
+      roundNumber: 1,
+      scores: {},
       status: 'image-submission',
       updatedAt: serverTimestamp(),
     }))
   })
 
+  test('jogador ativo assume a sala somente depois da tolerância do host', async () => {
+    await seedRoom('host', 2)
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const database = context.firestore()
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'players', 'guest'), playerData('Convidado'))
+      await updateDoc(doc(database, 'rooms', ROOM_CODE, 'players', 'host'), {
+        lastSeenAt: new Date(Date.now() - 90_000),
+      })
+    })
+
+    const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
+    await assertSucceeds(updateDoc(doc(guestDatabase, 'rooms', ROOM_CODE), {
+      hostId: 'guest',
+      updatedAt: serverTimestamp(),
+    }))
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        hostId: 'host',
+      })
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE, 'players', 'host'), {
+        lastSeenAt: new Date(),
+      })
+    })
+
+    await assertFails(updateDoc(doc(guestDatabase, 'rooms', ROOM_CODE), {
+      hostId: 'guest',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('jogador atualiza somente a própria presença durante qualquer fase', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'editing',
+      })
+    })
+
+    const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
+    const intruderDatabase = testEnvironment.authenticatedContext('intruder').firestore()
+    const hostRef = doc(hostDatabase, 'rooms', ROOM_CODE, 'players', 'host')
+
+    await assertSucceeds(updateDoc(hostRef, { lastSeenAt: serverTimestamp() }))
+    await assertFails(updateDoc(hostRef, {
+      lastSeenAt: serverTimestamp(),
+      username: 'Alterado',
+    }))
+    await assertFails(updateDoc(
+      doc(intruderDatabase, 'rooms', ROOM_CODE, 'players', 'host'),
+      { lastSeenAt: serverTimestamp() },
+    ))
+  })
+
   test('cada jogador envia somente a própria imagem-base durante a coleta', async () => {
     await seedRoom()
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
-      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'image-submission' })
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'image-submission',
+      })
     })
 
     const hostDatabase = testEnvironment.authenticatedContext('host').firestore()
@@ -214,11 +282,11 @@ describe('regras de salas', () => {
     }
 
     await assertSucceeds(setDoc(
-      doc(hostDatabase, 'rooms', ROOM_CODE, 'baseImages', 'host'),
+      doc(hostDatabase, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImages', 'host'),
       imageData,
     ))
     await assertFails(setDoc(
-      doc(guestDatabase, 'rooms', ROOM_CODE, 'baseImages', 'host'),
+      doc(guestDatabase, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImages', 'host'),
       imageData,
     ))
   })
@@ -227,15 +295,19 @@ describe('regras de salas', () => {
     await seedRoom()
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const database = context.firestore()
-      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'image-voting' })
-      await setDoc(doc(database, 'rooms', ROOM_CODE, 'baseImages', 'host'), {
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'image-voting',
+      })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImages', 'host'), {
         imageData: 'data:image/webp;base64,UklGRg==',
         submittedAt: new Date(),
       })
     })
 
     const database = testEnvironment.authenticatedContext('host').firestore()
-    const voteRef = doc(database, 'rooms', ROOM_CODE, 'baseImageVotes', 'host')
+    const voteRef = doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImageVotes', 'host')
 
     await assertSucceeds(setDoc(voteRef, {
       imageId: 'host',
@@ -252,8 +324,12 @@ describe('regras de salas', () => {
     const imageData = 'data:image/webp;base64,UklGRg=='
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const database = context.firestore()
-      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'image-voting' })
-      await setDoc(doc(database, 'rooms', ROOM_CODE, 'baseImages', 'host'), {
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'image-voting',
+      })
+      await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImages', 'host'), {
         imageData,
         submittedAt: new Date(),
       })
@@ -301,6 +377,18 @@ describe('regras de salas', () => {
     }))
   })
 
+  test('aceita partidas com dez, quinze ou vinte minutos de edição', async () => {
+    await seedRoom()
+    const database = testEnvironment.authenticatedContext('host').firestore()
+
+    for (const editDurationSeconds of [600, 900, 1200]) {
+      await assertSucceeds(updateDoc(doc(database, 'rooms', ROOM_CODE), {
+        settings: { ...DEFAULT_SETTINGS, editDurationSeconds },
+        updatedAt: serverTimestamp(),
+      }))
+    }
+  })
+
   test('permite entrada até completar oito jogadores', async () => {
     await seedRoom()
 
@@ -321,7 +409,11 @@ describe('regras de salas', () => {
     }
 
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
-      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'editing',
+      })
     })
 
     await assertSucceeds(setDoc(
@@ -337,7 +429,11 @@ describe('regras de salas', () => {
   test('bloqueia thumbs em formato inválido ou acima do limite', async () => {
     await seedRoom()
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
-      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'editing',
+      })
     })
 
     const database = testEnvironment.authenticatedContext('host').firestore()
@@ -364,7 +460,11 @@ describe('regras de salas', () => {
   test('somente o host abre a galeria de votação das thumbs', async () => {
     await seedRoom()
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
-      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { status: 'editing' })
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'editing',
+      })
     })
 
     const guestDatabase = testEnvironment.authenticatedContext('guest').firestore()
@@ -384,7 +484,11 @@ describe('regras de salas', () => {
     await seedRoom('host', 2)
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const database = context.firestore()
-      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'thumb-voting' })
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'thumb-voting',
+      })
       await setDoc(doc(database, 'rooms', ROOM_CODE, 'players', 'guest'), playerData('Convidado'))
       await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'), {
         imageData: 'data:image/webp;base64,UklGRg==',
@@ -414,7 +518,11 @@ describe('regras de salas', () => {
     await seedRoom()
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const database = context.firestore()
-      await updateDoc(doc(database, 'rooms', ROOM_CODE), { status: 'thumb-voting' })
+      await updateDoc(doc(database, 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        scores: {},
+        status: 'thumb-voting',
+      })
       await setDoc(doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'submissions', 'host'), {
         imageData,
         submittedAt: new Date(),
@@ -425,15 +533,102 @@ describe('regras de salas', () => {
     const roomRef = doc(database, 'rooms', ROOM_CODE)
 
     await assertFails(updateDoc(roomRef, {
-      roundWinnerId: 'host',
-      roundWinnerImageData: 'data:image/webp;base64,alterada',
+      roundWinnerId: 'missing',
+      scores: { host: 1 },
       status: 'round-results',
       updatedAt: serverTimestamp(),
     }))
     await assertSucceeds(updateDoc(roomRef, {
       roundWinnerId: 'host',
-      roundWinnerImageData: imageData,
+      scores: { host: 1 },
       status: 'round-results',
+      updatedAt: serverTimestamp(),
+    }))
+  })
+
+  test('isola imagens-base e votos na rodada ativa', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 2,
+        scores: { host: 1 },
+        status: 'image-submission',
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const imageData = {
+      imageData: 'data:image/webp;base64,UklGRg==',
+      submittedAt: serverTimestamp(),
+    }
+
+    await assertFails(setDoc(
+      doc(database, 'rooms', ROOM_CODE, 'rounds', '1', 'baseImages', 'host'),
+      imageData,
+    ))
+    await assertSucceeds(setDoc(
+      doc(database, 'rooms', ROOM_CODE, 'rounds', '2', 'baseImages', 'host'),
+      imageData,
+    ))
+  })
+
+  test('host avança somente uma rodada e preserva o placar', async () => {
+    await seedRoom()
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 1,
+        roundWinnerId: 'host',
+        scores: { host: 2 },
+        selectedImageData: 'data:image/webp;base64,UklGRg==',
+        selectedImageId: 'host',
+        status: 'round-results',
+      })
+    })
+
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const roomRef = doc(database, 'rooms', ROOM_CODE)
+    const clearedRoundFields = {
+      roundWinnerId: deleteField(),
+      selectedImageData: deleteField(),
+      selectedImageId: deleteField(),
+      status: 'image-submission',
+      updatedAt: serverTimestamp(),
+    }
+
+    await assertFails(updateDoc(roomRef, {
+      ...clearedRoundFields,
+      roundNumber: 3,
+    }))
+    await assertSucceeds(updateDoc(roomRef, {
+      ...clearedRoundFields,
+      roundNumber: 2,
+    }))
+  })
+
+  test('host encerra a partida somente após a última rodada', async () => {
+    await seedRoom()
+    const database = testEnvironment.authenticatedContext('host').firestore()
+    const roomRef = doc(database, 'rooms', ROOM_CODE)
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), {
+        roundNumber: 2,
+        scores: { host: 3 },
+        status: 'round-results',
+      })
+    })
+
+    await assertFails(updateDoc(roomRef, {
+      status: 'match-results',
+      updatedAt: serverTimestamp(),
+    }))
+
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await updateDoc(doc(context.firestore(), 'rooms', ROOM_CODE), { roundNumber: 3 })
+    })
+
+    await assertSucceeds(updateDoc(roomRef, {
+      status: 'match-results',
       updatedAt: serverTimestamp(),
     }))
   })
