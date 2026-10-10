@@ -53,6 +53,31 @@ Cloud Firestore. Sem configuração, o frontend mantém o modo local para desenv
 
 As regras e o deploy da infraestrutura devem ser trabalhados na branch `backend`.
 
+## Deploy na Vercel
+
+O frontend está preparado para ser publicado como uma SPA do Vite. Ao importar o
+repositório na Vercel, use estas configurações:
+
+- **Production Branch:** `frontend`
+- **Root Directory:** `frontend`
+- **Framework Preset:** Vite
+- **Build Command:** `npm run build` (detectado pelo `vercel.json`)
+- **Output Directory:** `dist` (detectado pelo `vercel.json`)
+
+Cadastre em **Settings → Environment Variables**, para `Production` e `Preview`,
+as seis variáveis listadas em `.env.example`. Copie os valores de `.env.local`
+sem publicar esse arquivo no Git. O build da Vercel é interrompido com uma lista
+objetiva caso alguma variável esteja ausente.
+
+Depois que a Vercel gerar o domínio de produção, abra o Firebase Console e adicione
+somente o hostname, sem `https://`, em **Authentication → Settings → Authorized
+domains**. Repita o processo ao adicionar um domínio próprio. Se a API key do
+Firebase possuir restrições por referenciador no Google Cloud, inclua também os
+domínios da Vercel e o domínio próprio nessas restrições.
+
+O `vercel.json` mantém URLs internas da SPA funcionando após recarregar a página.
+O backend continua no Firebase; nenhuma função de servidor é publicada na Vercel.
+
 ## Atalhos
 
 - `Ctrl+Z`: desfazer.

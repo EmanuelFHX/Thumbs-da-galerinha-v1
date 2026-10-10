@@ -33,3 +33,9 @@ docs/      Regras, experiência e decisões compartilhadas
 - [Fluxo e wireframes](docs/flow-and-wireframes.md)
 - [Decisões técnicas](docs/technical-stack.md)
 - [Escopo do editor](docs/editor-scope.md)
+
+## Deploy do frontend
+
+As instruções e a configuração da Vercel estão em
+[`frontend/README.md`](frontend/README.md#deploy-na-vercel). Na Vercel, selecione a
+branch `frontend` e defina `frontend` como **Root Directory**.
