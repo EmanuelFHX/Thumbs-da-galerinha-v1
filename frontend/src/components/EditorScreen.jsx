@@ -21,6 +21,7 @@ import {
   stopEditorMusic,
 } from '../lib/audioSession.js'
 import { EDIT_DURATION_SECONDS, formatRoundTime } from '../lib/roundSession.js'
+import { PlayerAvatar } from './PlayerAvatar.jsx'
 import './editor.css'
 
 const DEFAULT_DOCUMENT_SIZE = { width: 960, height: 540 }
@@ -41,6 +42,10 @@ const SUBMISSION_CAPTURE_ATTEMPTS = [
 ]
 const MIN_ZOOM = 0.25
 const MAX_ZOOM = 2
+const BASE_IMAGE_ID = 'base-image'
+const MIN_BASE_IMAGE_SCALE = 0.1
+const MAX_BASE_IMAGE_SCALE = 3
+const DEFAULT_BASE_IMAGE_PLACEMENT = { offsetX: 0, offsetY: 0, scale: 1 }
 const STICKERS = [
   { name: 'Estrela', source: '/stickers/star.svg' },
   { name: 'Balão', source: '/stickers/speech.svg' },
@@ -139,6 +144,33 @@ function clamp(value, minimum, maximum) {
   return Math.min(Math.max(value, minimum), maximum)
 }
 
+function normalizeAreaRect(startX, startY, endX, endY, documentSize) {
+  const x = clamp(Math.min(startX, endX), 0, documentSize.width)
+  const y = clamp(Math.min(startY, endY), 0, documentSize.height)
+  const right = clamp(Math.max(startX, endX), 0, documentSize.width)
+  const bottom = clamp(Math.max(startY, endY), 0, documentSize.height)
+
+  return {
+    x,
+    y,
+    width: right - x,
+    height: bottom - y,
+  }
+}
+
+function getPointBounds(points, documentSize) {
+  const xValues = points.filter((_, index) => index % 2 === 0)
+  const yValues = points.filter((_, index) => index % 2 === 1)
+  if (xValues.length === 0 || yValues.length === 0) return null
+
+  const x = clamp(Math.min(...xValues), 0, documentSize.width)
+  const y = clamp(Math.min(...yValues), 0, documentSize.height)
+  const right = clamp(Math.max(...xValues), 0, documentSize.width)
+  const bottom = clamp(Math.max(...yValues), 0, documentSize.height)
+
+  return { x, y, width: right - x, height: bottom - y }
+}
+
 function getSnappedPosition(node, documentSize) {
   const threshold = 10
   const bounds = node.getClientRect({ skipShadow: true })
@@ -177,18 +209,45 @@ function getCropPatch(element, crop) {
   }
 }
 
-function getCoverCrop(image, documentSize) {
-  if (!image) return undefined
-  const imageRatio = image.naturalWidth / image.naturalHeight
-  const documentRatio = documentSize.width / documentSize.height
+function getBaseImageGeometry(image, documentSize, placement) {
+  if (!image) return null
 
-  if (imageRatio > documentRatio) {
-    const width = image.naturalHeight * documentRatio
-    return { x: (image.naturalWidth - width) / 2, y: 0, width, height: image.naturalHeight }
+  const coverScale = Math.max(
+    documentSize.width / image.naturalWidth,
+    documentSize.height / image.naturalHeight,
+  )
+  const scale = coverScale * placement.scale
+  const width = image.naturalWidth * scale
+  const height = image.naturalHeight * scale
+  const originX = (documentSize.width - width) / 2
+  const originY = (documentSize.height - height) / 2
+
+  return {
+    height,
+    originX,
+    originY,
+    width,
+    x: originX + placement.offsetX,
+    y: originY + placement.offsetY,
   }
+}
 
-  const height = image.naturalWidth / documentRatio
-  return { x: 0, y: (image.naturalHeight - height) / 2, width: image.naturalWidth, height }
+function normalizeBaseImagePlacement(image, documentSize, placement) {
+  const normalized = {
+    offsetX: Number(placement?.offsetX) || 0,
+    offsetY: Number(placement?.offsetY) || 0,
+    scale: clamp(Number(placement?.scale) || 1, MIN_BASE_IMAGE_SCALE, MAX_BASE_IMAGE_SCALE),
+  }
+  const geometry = getBaseImageGeometry(image, documentSize, normalized)
+  if (!geometry) return normalized
+
+  const horizontalLimit = Math.abs(geometry.width - documentSize.width) / 2
+  const verticalLimit = Math.abs(geometry.height - documentSize.height) / 2
+  return {
+    ...normalized,
+    offsetX: clamp(normalized.offsetX, -horizontalLimit, horizontalLimit),
+    offsetY: clamp(normalized.offsetY, -verticalLimit, verticalLimit),
+  }
 }
 
 function useCanvasImage(source) {
@@ -341,6 +400,23 @@ function EditableNode({ documentSize, element, isInteractive, isSelected, onChan
     )
   }
 
+  if (element.type === 'path') {
+    shape = (
+      <Line
+        {...sharedProps}
+        points={element.points}
+        closed
+        fill={element.fill}
+        stroke={element.stroke ?? '#25232b'}
+        strokeWidth={element.strokeWidth ?? 5}
+        lineJoin="round"
+        shadowColor="#25232b"
+        shadowOffset={{ x: 7, y: 7 }}
+        shadowOpacity={0.55}
+      />
+    )
+  }
+
   if (element.type === 'image' && elementImage) {
     const imageFilters = [
       Konva.Filters.Brightness,
@@ -393,6 +469,101 @@ function EditableNode({ documentSize, element, isInteractive, isSelected, onChan
   )
 }
 
+function EditableBaseImage({ documentSize, image, isInteractive, isSelected, onChange, onSelect, placement }) {
+  const geometry = getBaseImageGeometry(image, documentSize, placement)
+  if (!geometry) return null
+
+  return (
+    <>
+      <KonvaImage
+        id={BASE_IMAGE_ID}
+        image={image}
+        x={geometry.x}
+        y={geometry.y}
+        width={geometry.width}
+        height={geometry.height}
+        draggable={isInteractive}
+        listening={isInteractive}
+        onClick={onSelect}
+        onTap={onSelect}
+        onDragEnd={(event) => onChange({
+          ...placement,
+          offsetX: event.target.x() - geometry.originX,
+          offsetY: event.target.y() - geometry.originY,
+        })}
+      />
+      {isSelected && (
+        <Rect
+          name="editor-selection-guide"
+          x={geometry.x}
+          y={geometry.y}
+          width={geometry.width}
+          height={geometry.height}
+          stroke="#146db7"
+          strokeWidth={4}
+          dash={[14, 8]}
+          listening={false}
+        />
+      )}
+    </>
+  )
+}
+
+function AreaSelectionOverlay({ selection }) {
+  const previewImage = useCanvasImage(selection?.previewSource)
+  if (!selection) return null
+
+  if (selection.type === 'magic' && previewImage) {
+    return (
+      <>
+        <KonvaImage
+          name="editor-selection-guide"
+          image={previewImage}
+          x={0}
+          y={0}
+          listening={false}
+        />
+        <Rect
+          name="editor-selection-guide"
+          {...selection.bounds}
+          stroke="#146db7"
+          strokeWidth={3}
+          dash={[10, 7]}
+          listening={false}
+        />
+      </>
+    )
+  }
+
+  if (selection.type === 'lasso') {
+    return (
+      <Line
+        name="editor-selection-guide"
+        points={selection.points}
+        closed
+        fill="rgba(255, 212, 71, 0.16)"
+        stroke="#146db7"
+        strokeWidth={3}
+        dash={[10, 7]}
+        lineJoin="round"
+        listening={false}
+      />
+    )
+  }
+
+  return (
+    <Rect
+      name="editor-selection-guide"
+      {...selection.bounds}
+      fill={selection.type === 'crop' ? 'rgba(255, 92, 122, 0.16)' : 'rgba(255, 212, 71, 0.16)'}
+      stroke={selection.type === 'crop' ? '#ff5c7a' : '#146db7'}
+      strokeWidth={3}
+      dash={[10, 7]}
+      listening={false}
+    />
+  )
+}
+
 function ToolButton({ active = false, children, onClick, title }) {
   return (
     <button
@@ -414,6 +585,7 @@ function getLayerLabel(element, index) {
     return element.mode === 'eraser' ? `Borracha ${index + 1}` : `Traço ${index + 1}`
   }
   if (element.type === 'circle') return 'Círculo'
+  if (element.type === 'path') return 'Forma da caneta'
   return 'Retângulo'
 }
 
@@ -437,12 +609,21 @@ function getInitialMusicMuted() {
   }
 }
 
-function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, round, sessionKey }) {
+function EditorScreen({
+  baseImageSource = '/sample-base.svg',
+  onBack,
+  onFinish,
+  players = [],
+  round,
+  sessionKey,
+  submittedPlayerIds = [],
+}) {
   const stageRef = useRef(null)
   const canvasFrameRef = useRef(null)
   const fileInputRef = useRef(null)
   const isDrawing = useRef(false)
   const drawingStart = useRef([])
+  const selectionStart = useRef(null)
   const isSpacePressed = useRef(false)
   const panStart = useRef(null)
   const shortcutActions = useRef(null)
@@ -451,6 +632,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   const finishRoundRef = useRef(null)
   const saveGeneration = useRef(0)
   const baseImage = useCanvasImage(baseImageSource)
+  const submittedPlayers = new Set(submittedPlayerIds)
 
   const [tool, setTool] = useState(getInitialTool)
   const [sidePanel, setSidePanel] = useState(getInitialSidePanel)
@@ -461,11 +643,15 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   const [eraserSize, setEraserSize] = useState(34)
   const [selectedId, setSelectedId] = useState(null)
   const [elements, setElements] = useState([])
+  const [baseImagePlacement, setBaseImagePlacement] = useState(DEFAULT_BASE_IMAGE_PLACEMENT)
   const [documentSize, setDocumentSize] = useState(DEFAULT_DOCUMENT_SIZE)
   const [documentDraft, setDocumentDraft] = useState(DEFAULT_DOCUMENT_SIZE)
   const [lockDocumentRatio, setLockDocumentRatio] = useState(true)
   const [scaleDocumentContent, setScaleDocumentContent] = useState(false)
   const [cropDraft, setCropDraft] = useState(null)
+  const [areaSelection, setAreaSelection] = useState(null)
+  const [penPoints, setPenPoints] = useState([])
+  const [magicTolerance, setMagicTolerance] = useState(36)
   const [past, setPast] = useState([])
   const [future, setFuture] = useState([])
   const [status, setStatus] = useState('Escolha uma ferramenta e comece a criar.')
@@ -485,6 +671,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   const initialMusicMutedRef = useRef(musicMuted)
 
   const selectedElement = elements.find((element) => element.id === selectedId)
+  const isBaseImageSelected = selectedId === BASE_IMAGE_ID
   const activeCropDraft = cropDraft?.elementId === selectedId ? cropDraft : null
   const renderedElements = activeCropDraft
     ? elements.map((element) => (
@@ -493,18 +680,363 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
           : element
       ))
     : elements
-  const baseCrop = getCoverCrop(baseImage, documentSize)
+  const normalizedBaseImagePlacement = normalizeBaseImagePlacement(
+    baseImage,
+    documentSize,
+    baseImagePlacement,
+  )
+  const baseImageGeometry = getBaseImageGeometry(baseImage, documentSize, normalizedBaseImagePlacement)
+  const baseHorizontalLimit = baseImageGeometry
+    ? Math.round(Math.abs(baseImageGeometry.width - documentSize.width) / 2)
+    : 0
+  const baseVerticalLimit = baseImageGeometry
+    ? Math.round(Math.abs(baseImageGeometry.height - documentSize.height) / 2)
+    : 0
   const hasPersistableContent = elements.length > 0
     || documentSize.width !== DEFAULT_DOCUMENT_SIZE.width
     || documentSize.height !== DEFAULT_DOCUMENT_SIZE.height
+    || baseImagePlacement.offsetX !== 0
+    || baseImagePlacement.offsetY !== 0
+    || baseImagePlacement.scale !== 1
 
-  function commit(nextElements, message, nextDocumentSize = documentSize) {
-    setPast((current) => [...current, { elements, documentSize }])
+  function commit(
+    nextElements,
+    message,
+    nextDocumentSize = documentSize,
+    nextBaseImagePlacement = baseImagePlacement,
+  ) {
+    setPast((current) => [...current, { baseImagePlacement, elements, documentSize }])
     setElements(nextElements)
+    setBaseImagePlacement(nextBaseImagePlacement)
     setDocumentSize(nextDocumentSize)
     setDocumentDraft(nextDocumentSize)
     setFuture([])
     if (message) setStatus(message)
+  }
+
+  function updateBaseImagePlacement(nextPlacement, message = 'Foto principal reposicionada.') {
+    const normalizedPlacement = normalizeBaseImagePlacement(baseImage, documentSize, nextPlacement)
+    commit(elements, message, documentSize, normalizedPlacement)
+  }
+
+  function adjustBaseImageScale(delta) {
+    const nextScale = clamp(
+      Math.round((normalizedBaseImagePlacement.scale + delta) * 10) / 10,
+      MIN_BASE_IMAGE_SCALE,
+      MAX_BASE_IMAGE_SCALE,
+    )
+
+    updateBaseImagePlacement({
+      ...normalizedBaseImagePlacement,
+      scale: nextScale,
+    }, delta < 0 ? 'Foto principal diminuída.' : 'Foto principal aumentada.')
+  }
+
+  function activateAreaTool(nextTool, message) {
+    setTool(nextTool)
+    setSelectedId(null)
+    setCropDraft(null)
+    setAreaSelection(null)
+    setPenPoints([])
+    setSidePanel('properties')
+    setStatus(message)
+  }
+
+  function getCleanStageCanvas() {
+    const stage = stageRef.current
+    if (!stage) return null
+
+    const transformers = stage.find('Transformer')
+    const selectionGuides = stage.find('.editor-selection-guide')
+    transformers.forEach((transformer) => transformer.visible(false))
+    selectionGuides.forEach((guide) => guide.visible(false))
+    stage.batchDraw()
+
+    try {
+      return stage.toCanvas({ pixelRatio: 1 })
+    } finally {
+      transformers.forEach((transformer) => transformer.visible(true))
+      selectionGuides.forEach((guide) => guide.visible(true))
+      stage.batchDraw()
+    }
+  }
+
+  function selectMagicArea(point) {
+    const canvas = getCleanStageCanvas()
+    if (!canvas) return
+
+    const context = canvas.getContext('2d', { willReadFrequently: true })
+    let imageData
+    try {
+      imageData = context.getImageData(0, 0, canvas.width, canvas.height)
+    } catch {
+      setStatus('A varinha não conseguiu ler essa imagem. Tente outra área.')
+      return
+    }
+
+    const startX = clamp(Math.floor(point.x), 0, canvas.width - 1)
+    const startY = clamp(Math.floor(point.y), 0, canvas.height - 1)
+    const startIndex = startY * canvas.width + startX
+    const targetOffset = startIndex * 4
+    const target = imageData.data.slice(targetOffset, targetOffset + 4)
+    const visited = new Uint8Array(canvas.width * canvas.height)
+    const mask = new Uint8Array(canvas.width * canvas.height)
+    const queue = new Int32Array(canvas.width * canvas.height)
+    let queueStart = 0
+    let queueEnd = 1
+    queue[0] = startIndex
+    visited[startIndex] = 1
+    let minX = startX
+    let maxX = startX
+    let minY = startY
+    let maxY = startY
+    let selectedCount = 0
+
+    while (queueStart < queueEnd) {
+      const pixelIndex = queue[queueStart]
+      queueStart += 1
+      const offset = pixelIndex * 4
+      const matches = Math.abs(imageData.data[offset] - target[0]) <= magicTolerance
+        && Math.abs(imageData.data[offset + 1] - target[1]) <= magicTolerance
+        && Math.abs(imageData.data[offset + 2] - target[2]) <= magicTolerance
+        && Math.abs(imageData.data[offset + 3] - target[3]) <= magicTolerance
+      if (!matches) continue
+
+      mask[pixelIndex] = 1
+      selectedCount += 1
+      const x = pixelIndex % canvas.width
+      const y = Math.floor(pixelIndex / canvas.width)
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minY = Math.min(minY, y)
+      maxY = Math.max(maxY, y)
+
+      const left = pixelIndex - 1
+      const right = pixelIndex + 1
+      const top = pixelIndex - canvas.width
+      const bottom = pixelIndex + canvas.width
+      if (x > 0 && !visited[left]) {
+        visited[left] = 1
+        queue[queueEnd] = left
+        queueEnd += 1
+      }
+      if (x < canvas.width - 1 && !visited[right]) {
+        visited[right] = 1
+        queue[queueEnd] = right
+        queueEnd += 1
+      }
+      if (y > 0 && !visited[top]) {
+        visited[top] = 1
+        queue[queueEnd] = top
+        queueEnd += 1
+      }
+      if (y < canvas.height - 1 && !visited[bottom]) {
+        visited[bottom] = 1
+        queue[queueEnd] = bottom
+        queueEnd += 1
+      }
+    }
+
+    if (selectedCount === 0) {
+      setStatus('Nenhuma área semelhante foi encontrada nesse ponto.')
+      return
+    }
+
+    const previewCanvas = document.createElement('canvas')
+    previewCanvas.width = canvas.width
+    previewCanvas.height = canvas.height
+    const previewContext = previewCanvas.getContext('2d')
+    const previewData = previewContext.createImageData(canvas.width, canvas.height)
+    for (let index = 0; index < mask.length; index += 1) {
+      if (!mask[index]) continue
+      const offset = index * 4
+      previewData.data[offset] = 255
+      previewData.data[offset + 1] = 212
+      previewData.data[offset + 2] = 71
+      previewData.data[offset + 3] = 92
+    }
+    previewContext.putImageData(previewData, 0, 0)
+
+    setAreaSelection({
+      type: 'magic',
+      bounds: { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 },
+      mask,
+      previewSource: previewCanvas.toDataURL('image/png'),
+    })
+    setSidePanel('properties')
+    setStatus(`${selectedCount.toLocaleString('pt-BR')} pixels semelhantes selecionados.`)
+  }
+
+  function copyAreaSelectionToLayer() {
+    if (!areaSelection) return
+    const sourceCanvas = getCleanStageCanvas()
+    if (!sourceCanvas) return
+
+    const bounds = {
+      x: Math.max(0, Math.floor(areaSelection.bounds.x)),
+      y: Math.max(0, Math.floor(areaSelection.bounds.y)),
+      width: Math.max(1, Math.ceil(areaSelection.bounds.width)),
+      height: Math.max(1, Math.ceil(areaSelection.bounds.height)),
+    }
+    const output = document.createElement('canvas')
+    output.width = bounds.width
+    output.height = bounds.height
+    const outputContext = output.getContext('2d')
+
+    if (areaSelection.type === 'magic') {
+      const sourceContext = sourceCanvas.getContext('2d', { willReadFrequently: true })
+      const sourceData = sourceContext.getImageData(bounds.x, bounds.y, bounds.width, bounds.height)
+      const extractedData = outputContext.createImageData(bounds.width, bounds.height)
+      for (let y = 0; y < bounds.height; y += 1) {
+        for (let x = 0; x < bounds.width; x += 1) {
+          const sourceIndex = (bounds.y + y) * sourceCanvas.width + bounds.x + x
+          if (!areaSelection.mask[sourceIndex]) continue
+          const localOffset = (y * bounds.width + x) * 4
+          extractedData.data[localOffset] = sourceData.data[localOffset]
+          extractedData.data[localOffset + 1] = sourceData.data[localOffset + 1]
+          extractedData.data[localOffset + 2] = sourceData.data[localOffset + 2]
+          extractedData.data[localOffset + 3] = sourceData.data[localOffset + 3]
+        }
+      }
+      outputContext.putImageData(extractedData, 0, 0)
+    } else if (areaSelection.type === 'lasso') {
+      outputContext.save()
+      outputContext.translate(-bounds.x, -bounds.y)
+      outputContext.beginPath()
+      areaSelection.points.forEach((coordinate, index) => {
+        if (index % 2 !== 0) return
+        const x = coordinate
+        const y = areaSelection.points[index + 1]
+        if (index === 0) outputContext.moveTo(x, y)
+        else outputContext.lineTo(x, y)
+      })
+      outputContext.closePath()
+      outputContext.clip()
+      outputContext.drawImage(sourceCanvas, 0, 0)
+      outputContext.restore()
+    } else {
+      outputContext.drawImage(
+        sourceCanvas,
+        bounds.x,
+        bounds.y,
+        bounds.width,
+        bounds.height,
+        0,
+        0,
+        bounds.width,
+        bounds.height,
+      )
+    }
+
+    const nextElement = {
+      id: createId('image'),
+      type: 'image',
+      source: output.toDataURL('image/png'),
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+      opacity: 1,
+      rotation: 0,
+      brightness: 1,
+      contrast: 0,
+      saturation: 0,
+      blur: 0,
+      grayscale: false,
+    }
+    commit([...elements, nextElement], 'Seleção copiada para uma nova camada.')
+    setAreaSelection(null)
+    setSelectedId(nextElement.id)
+    setTool('select')
+  }
+
+  function applyDocumentCrop() {
+    if (!areaSelection?.bounds) return
+    const bounds = {
+      x: Math.round(areaSelection.bounds.x),
+      y: Math.round(areaSelection.bounds.y),
+      width: Math.round(areaSelection.bounds.width),
+      height: Math.round(areaSelection.bounds.height),
+    }
+    if (bounds.width < MIN_DOCUMENT_WIDTH || bounds.height < MIN_DOCUMENT_HEIGHT) {
+      setStatus(`O corte precisa ter pelo menos ${MIN_DOCUMENT_WIDTH} × ${MIN_DOCUMENT_HEIGHT} px.`)
+      return
+    }
+
+    const nextDocumentSize = { width: bounds.width, height: bounds.height }
+    const nextElements = elements.map((element) => {
+      if (element.type === 'line') {
+        return {
+          ...element,
+          points: element.points.map((coordinate, index) => (
+            coordinate - (index % 2 === 0 ? bounds.x : bounds.y)
+          )),
+        }
+      }
+      return {
+        ...element,
+        x: (element.x ?? 0) - bounds.x,
+        y: (element.y ?? 0) - bounds.y,
+      }
+    })
+
+    let nextBasePlacement = DEFAULT_BASE_IMAGE_PLACEMENT
+    if (baseImage && baseImageGeometry) {
+      const displayedScale = baseImageGeometry.width / baseImage.naturalWidth
+      const nextCoverScale = Math.max(
+        nextDocumentSize.width / baseImage.naturalWidth,
+        nextDocumentSize.height / baseImage.naturalHeight,
+      )
+      const nextScale = clamp(
+        displayedScale / nextCoverScale,
+        MIN_BASE_IMAGE_SCALE,
+        MAX_BASE_IMAGE_SCALE,
+      )
+      const nextGeometry = getBaseImageGeometry(baseImage, nextDocumentSize, {
+        offsetX: 0,
+        offsetY: 0,
+        scale: nextScale,
+      })
+      nextBasePlacement = normalizeBaseImagePlacement(baseImage, nextDocumentSize, {
+        scale: nextScale,
+        offsetX: baseImageGeometry.x - bounds.x - nextGeometry.originX,
+        offsetY: baseImageGeometry.y - bounds.y - nextGeometry.originY,
+      })
+    }
+
+    commit(nextElements, `Documento cortado para ${bounds.width} × ${bounds.height}.`, nextDocumentSize, nextBasePlacement)
+    setAreaSelection(null)
+    setTool('select')
+    setFitMode(true)
+    setSelectedId(null)
+  }
+
+  function finishPenPath() {
+    if (penPoints.length < 6) {
+      setStatus('Adicione pelo menos 3 pontos para fechar a forma.')
+      return
+    }
+    const bounds = getPointBounds(penPoints, documentSize)
+    if (!bounds) return
+
+    const nextElement = {
+      id: createId('path'),
+      type: 'path',
+      x: bounds.x,
+      y: bounds.y,
+      points: penPoints.map((coordinate, index) => (
+        coordinate - (index % 2 === 0 ? bounds.x : bounds.y)
+      )),
+      fill: brushColor,
+      stroke: '#25232b',
+      strokeWidth: 5,
+      opacity: 1,
+      rotation: 0,
+    }
+    commit([...elements, nextElement], 'Forma vetorial criada com a caneta.')
+    setPenPoints([])
+    setSelectedId(nextElement.id)
+    setTool('select')
   }
 
   function handleBack() {
@@ -528,10 +1060,13 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     hasUnsavedChanges.current = false
     saveGeneration.current += 1
     setElements([])
+    setBaseImagePlacement(DEFAULT_BASE_IMAGE_PLACEMENT)
     setDocumentSize(DEFAULT_DOCUMENT_SIZE)
     setDocumentDraft(DEFAULT_DOCUMENT_SIZE)
     setSelectedId(null)
     setCropDraft(null)
+    setAreaSelection(null)
+    setPenPoints([])
     setPast([])
     setFuture([])
     setBrushColor('#ff5c7a')
@@ -580,6 +1115,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     commit([...elements, nextElement], 'Texto adicionado. Arraste ou redimensione pelas alças.')
     setSelectedId(nextElement.id)
     setTool('select')
+    setAreaSelection(null)
+    setPenPoints([])
     setSidePanel('properties')
   }
 
@@ -607,6 +1144,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     commit([...elements, nextElement], 'Forma adicionada ao canvas.')
     setSelectedId(nextElement.id)
     setTool('select')
+    setAreaSelection(null)
+    setPenPoints([])
     setSidePanel('properties')
   }
 
@@ -641,6 +1180,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     commit([...elements, nextElement], message)
     setSelectedId(nextElement.id)
     setTool('select')
+    setAreaSelection(null)
+    setPenPoints([])
     setSidePanel('properties')
   }
 
@@ -797,6 +1338,11 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
           }
         })
       : elements
+    const nextBaseImagePlacement = normalizeBaseImagePlacement(baseImage, normalizedSize, {
+      ...baseImagePlacement,
+      offsetX: scaleDocumentContent ? baseImagePlacement.offsetX * scaleX : baseImagePlacement.offsetX,
+      offsetY: scaleDocumentContent ? baseImagePlacement.offsetY * scaleY : baseImagePlacement.offsetY,
+    })
 
     setCropDraft(null)
     setFitMode(true)
@@ -804,6 +1350,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
       nextElements,
       `Documento redimensionado para ${normalizedSize.width} × ${normalizedSize.height}.`,
       normalizedSize,
+      nextBaseImagePlacement,
     )
   }
 
@@ -879,6 +1426,23 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     }
     panStart.current = null
     setIsPanning(false)
+  }
+
+  function nudgeSelected(deltaX, deltaY) {
+    if (isBaseImageSelected) {
+      updateBaseImagePlacement({
+        ...baseImagePlacement,
+        offsetX: baseImagePlacement.offsetX + deltaX,
+        offsetY: baseImagePlacement.offsetY + deltaY,
+      }, 'Foto principal movida com precisão.')
+      return
+    }
+
+    if (!selectedElement || selectedElement.locked) return
+    updateSelected({
+      x: selectedElement.x + deltaX,
+      y: selectedElement.y + deltaY,
+    })
   }
 
   function alignSelected(alignment) {
@@ -998,6 +1562,15 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             height: clamp(session.documentSize?.height ?? DEFAULT_DOCUMENT_SIZE.height, MIN_DOCUMENT_HEIGHT, MAX_DOCUMENT_SIZE),
           }
           setElements(Array.isArray(session.elements) ? session.elements : [])
+          setBaseImagePlacement({
+            offsetX: Number(session.baseImagePlacement?.offsetX) || 0,
+            offsetY: Number(session.baseImagePlacement?.offsetY) || 0,
+            scale: clamp(
+              Number(session.baseImagePlacement?.scale) || 1,
+              MIN_BASE_IMAGE_SCALE,
+              MAX_BASE_IMAGE_SCALE,
+            ),
+          })
           setDocumentSize(restoredSize)
           setDocumentDraft(restoredSize)
           setBrushColor(session.settings?.brushColor ?? '#ff5c7a')
@@ -1072,6 +1645,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
       setSaveStatus('saving')
       try {
         const savedAt = await saveEditorSession({
+          baseImagePlacement,
           documentSize,
           elements,
           settings: {
@@ -1103,6 +1677,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     brushOpacity,
     brushSize,
     brushSoftness,
+    baseImagePlacement,
     documentSize,
     elements,
     eraserSize,
@@ -1166,6 +1741,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
       deleteSelected,
       duplicateSelected,
       fitCanvas,
+      nudgeSelected,
       redo,
       selectedId,
       setZoomLevel,
@@ -1210,6 +1786,20 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
         setSelectedId(null)
         setSidePanel('properties')
         setStatus('Clique em uma cor do canvas para capturá-la.')
+      }
+      if (!hasModifier && event.key.toLowerCase() === 'v') {
+        setTool('select')
+        setCropDraft(null)
+        setAreaSelection(null)
+        setPenPoints([])
+        setStatus('Ferramenta Mover selecionada. Arraste uma camada ou use as setas.')
+      }
+      if (!hasModifier && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) {
+        event.preventDefault()
+        const distance = event.shiftKey ? 10 : 1
+        const horizontal = event.key === 'ArrowLeft' ? -distance : event.key === 'ArrowRight' ? distance : 0
+        const vertical = event.key === 'ArrowUp' ? -distance : event.key === 'ArrowDown' ? distance : 0
+        actions.nudgeSelected(horizontal, vertical)
       }
 
       if (hasModifier && event.key.toLowerCase() === 'z') {
@@ -1258,8 +1848,9 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     if (past.length === 0) return
     const previous = past[past.length - 1]
     setPast(past.slice(0, -1))
-    setFuture([{ elements, documentSize }, ...future])
+    setFuture([{ baseImagePlacement, elements, documentSize }, ...future])
     setElements(previous.elements)
+    setBaseImagePlacement(previous.baseImagePlacement ?? DEFAULT_BASE_IMAGE_PLACEMENT)
     setDocumentSize(previous.documentSize)
     setDocumentDraft(previous.documentSize)
     setCropDraft(null)
@@ -1271,8 +1862,9 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     if (future.length === 0) return
     const next = future[0]
     setFuture(future.slice(1))
-    setPast([...past, { elements, documentSize }])
+    setPast([...past, { baseImagePlacement, elements, documentSize }])
     setElements(next.elements)
+    setBaseImagePlacement(next.baseImagePlacement ?? DEFAULT_BASE_IMAGE_PLACEMENT)
     setDocumentSize(next.documentSize)
     setDocumentDraft(next.documentSize)
     setCropDraft(null)
@@ -1301,7 +1893,9 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     const stage = stageRef.current
     const point = event.target.getStage().getPointerPosition()
     const transformers = stage.find('Transformer')
+    const selectionGuides = stage.find('.editor-selection-guide')
     transformers.forEach((transformer) => transformer.visible(false))
+    selectionGuides.forEach((guide) => guide.visible(false))
     stage.batchDraw()
 
     let pixel
@@ -1319,6 +1913,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
       return
     } finally {
       transformers.forEach((transformer) => transformer.visible(true))
+      selectionGuides.forEach((guide) => guide.visible(true))
       stage.batchDraw()
     }
 
@@ -1341,8 +1936,45 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   function beginDrawing(event) {
     if (isSpacePressed.current) return
 
+    const point = event.target.getStage().getPointerPosition()
+
     if (tool === 'eyedropper') {
       sampleCanvasColor(event)
+      return
+    }
+
+    if (tool === 'magic-wand') {
+      event.evt.preventDefault()
+      selectMagicArea(point)
+      return
+    }
+
+    if (tool === 'pen') {
+      event.evt.preventDefault()
+      setPenPoints((current) => [...current, point.x, point.y])
+      setStatus('Ponto adicionado. Continue clicando ou finalize a forma no painel.')
+      return
+    }
+
+    if (tool === 'marquee' || tool === 'crop') {
+      event.evt.preventDefault()
+      isDrawing.current = true
+      selectionStart.current = point
+      setAreaSelection({
+        type: tool,
+        bounds: { x: point.x, y: point.y, width: 0, height: 0 },
+      })
+      return
+    }
+
+    if (tool === 'lasso') {
+      event.evt.preventDefault()
+      isDrawing.current = true
+      setAreaSelection({
+        type: 'lasso',
+        points: [point.x, point.y],
+        bounds: { x: point.x, y: point.y, width: 0, height: 0 },
+      })
       return
     }
 
@@ -1353,8 +1985,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
 
     event.evt.preventDefault()
     isDrawing.current = true
-    drawingStart.current = { elements, documentSize }
-    const point = event.target.getStage().getPointerPosition()
+    drawingStart.current = { baseImagePlacement, elements, documentSize }
     const nextLine = {
       id: createId('line'),
       type: 'line',
@@ -1370,9 +2001,33 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   }
 
   function continueDrawing(event) {
-    if (!isDrawing.current || (tool !== 'brush' && tool !== 'eraser')) return
+    if (!isDrawing.current) return
     event.evt.preventDefault()
     const point = event.target.getStage().getPointerPosition()
+
+    if ((tool === 'marquee' || tool === 'crop') && selectionStart.current) {
+      setAreaSelection({
+        type: tool,
+        bounds: normalizeAreaRect(
+          selectionStart.current.x,
+          selectionStart.current.y,
+          point.x,
+          point.y,
+          documentSize,
+        ),
+      })
+      return
+    }
+
+    if (tool === 'lasso') {
+      setAreaSelection((current) => {
+        const points = [...(current?.points ?? []), point.x, point.y]
+        return { type: 'lasso', points, bounds: getPointBounds(points, documentSize) }
+      })
+      return
+    }
+
+    if (tool !== 'brush' && tool !== 'eraser') return
 
     setElements((current) => {
       const next = [...current]
@@ -1388,6 +2043,30 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
   function finishDrawing() {
     if (!isDrawing.current) return
     isDrawing.current = false
+
+    if (tool === 'marquee' || tool === 'crop') {
+      selectionStart.current = null
+      if (!areaSelection || areaSelection.bounds.width < 2 || areaSelection.bounds.height < 2) {
+        setAreaSelection(null)
+        setStatus('Arraste no canvas para marcar uma área.')
+        return
+      }
+      setSidePanel('properties')
+      setStatus(tool === 'crop' ? 'Área de corte pronta para aplicar.' : 'Área retangular selecionada.')
+      return
+    }
+
+    if (tool === 'lasso') {
+      if (!areaSelection || areaSelection.points.length < 6) {
+        setAreaSelection(null)
+        setStatus('Desenhe um contorno fechado maior para selecionar.')
+        return
+      }
+      setSidePanel('properties')
+      setStatus('Seleção livre pronta para copiar.')
+      return
+    }
+
     setPast((current) => [...current, drawingStart.current])
     setFuture([])
     setStatus(tool === 'eraser' ? 'Área apagada.' : 'Traço adicionado.')
@@ -1398,12 +2077,15 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
     if (!stage) return null
 
     const transformers = stage.find('Transformer')
+    const selectionGuides = stage.find('.editor-selection-guide')
     transformers.forEach((transformer) => transformer.visible(false))
+    selectionGuides.forEach((guide) => guide.visible(false))
     stage.batchDraw()
 
     const dataUrl = stage.toDataURL({ mimeType, pixelRatio, quality })
 
     transformers.forEach((transformer) => transformer.visible(true))
+    selectionGuides.forEach((guide) => guide.visible(true))
     stage.batchDraw()
     return dataUrl
   }
@@ -1481,6 +2163,31 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             </button>
           </div>
         </div>
+        {players.length > 0 && (
+          <div
+            className="editor-player-progress"
+            role="status"
+            aria-label={`${submittedPlayerIds.length} de ${players.length} jogadores enviaram a thumb`}
+          >
+            <div className="editor-player-stack" aria-hidden="true">
+              {players.map((currentPlayer) => {
+                const hasSubmitted = submittedPlayers.has(currentPlayer.id)
+
+                return (
+                  <span
+                    className={`editor-player-token${hasSubmitted ? ' is-submitted' : ''}`}
+                    title={`${currentPlayer.username}: ${hasSubmitted ? 'thumb enviada' : 'editando'}`}
+                    key={currentPlayer.id}
+                  >
+                    <PlayerAvatar avatarId={currentPlayer.avatarId} />
+                    {hasSubmitted && <i className="bi bi-check" />}
+                  </span>
+                )
+              })}
+            </div>
+            <span>{submittedPlayerIds.length}/{players.length} enviados</span>
+          </div>
+        )}
         <button
           className={`music-toggle${musicMuted ? ' is-muted' : ''}`}
           type="button"
@@ -1506,11 +2213,57 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
         <aside className="tool-rail" aria-label="Ferramentas do editor">
           <ToolButton
             active={tool === 'select'}
-            onClick={() => setTool('select')}
-            title="Selecionar e mover"
+            onClick={() => {
+              setTool('select')
+              setCropDraft(null)
+              setAreaSelection(null)
+              setPenPoints([])
+              setStatus('Ferramenta Mover selecionada. Arraste uma camada ou use as setas.')
+            }}
+            title="Mover camadas (V)"
           >
-            <i className="bi bi-cursor-fill" aria-hidden="true" />
-            Selecionar
+            <i className="bi bi-arrows-move" aria-hidden="true" />
+            Mover
+          </ToolButton>
+          <ToolButton
+            active={tool === 'marquee'}
+            onClick={() => activateAreaTool('marquee', 'Arraste para criar uma seleção retangular.')}
+            title="Seleção retangular"
+          >
+            <i className="bi bi-bounding-box" aria-hidden="true" />
+            Seleção
+          </ToolButton>
+          <ToolButton
+            active={tool === 'lasso'}
+            onClick={() => activateAreaTool('lasso', 'Desenhe livremente ao redor da área desejada.')}
+            title="Laço de seleção livre"
+          >
+            <i className="bi bi-bezier2" aria-hidden="true" />
+            Laço
+          </ToolButton>
+          <ToolButton
+            active={tool === 'magic-wand'}
+            onClick={() => activateAreaTool('magic-wand', 'Clique em uma cor para selecionar pixels semelhantes conectados.')}
+            title="Varinha mágica"
+          >
+            <i className="bi bi-magic" aria-hidden="true" />
+            Varinha
+          </ToolButton>
+          <ToolButton
+            active={tool === 'pen'}
+            onClick={() => activateAreaTool('pen', 'Clique para adicionar os pontos da forma vetorial.')}
+            title="Caneta vetorial"
+          >
+            <i className="bi bi-pen-fill" aria-hidden="true" />
+            Caneta
+          </ToolButton>
+          <ToolButton
+            active={tool === 'crop'}
+            onClick={() => activateAreaTool('crop', 'Arraste a área que deve permanecer no documento.')}
+            title="Cortar documento"
+          >
+            <i className="bi bi-crop" aria-hidden="true" />
+            Corte
           </ToolButton>
           <ToolButton onClick={addText} title="Adicionar texto">
             <i className="bi bi-fonts" aria-hidden="true" />
@@ -1521,6 +2274,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             onClick={() => {
               setTool('brush')
               setSelectedId(null)
+              setAreaSelection(null)
+              setPenPoints([])
               setSidePanel('properties')
             }}
             title="Desenhar à mão livre"
@@ -1533,6 +2288,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             onClick={() => {
               setTool('eraser')
               setSelectedId(null)
+              setAreaSelection(null)
+              setPenPoints([])
               setSidePanel('properties')
             }}
             title="Apagar conteúdo desenhado"
@@ -1545,6 +2302,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             onClick={() => {
               setTool('eyedropper')
               setSelectedId(null)
+              setAreaSelection(null)
+              setPenPoints([])
               setSidePanel('properties')
               setStatus('Clique em uma cor do canvas para capturá-la.')
             }}
@@ -1570,6 +2329,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
             onClick={() => {
               setTool('stickers')
               setSelectedId(null)
+              setAreaSelection(null)
+              setPenPoints([])
             }}
             title="Abrir stickers"
           >
@@ -1616,7 +2377,7 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
 
           <div
             ref={canvasFrameRef}
-            className={`canvas-frame${tool === 'brush' || tool === 'eraser' ? ' is-drawing' : ''}${tool === 'eyedropper' ? ' is-eyedropper' : ''}${spaceDown ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}`}
+            className={`canvas-frame${tool === 'brush' || tool === 'eraser' ? ' is-drawing' : ''}${['marquee', 'lasso', 'pen', 'crop'].includes(tool) ? ' is-selecting' : ''}${tool === 'eyedropper' || tool === 'magic-wand' ? ' is-eyedropper' : ''}${spaceDown ? ' is-pan-ready' : ''}${isPanning ? ' is-panning' : ''}`}
             onWheel={handleCanvasWheel}
             onPointerDown={startPan}
             onPointerMove={continuePan}
@@ -1650,15 +2411,23 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                   onTouchMove={continueDrawing}
                   onTouchEnd={finishDrawing}
                 >
-                  <Layer listening={false}>
+                  <Layer>
                     <Rect width={documentSize.width} height={documentSize.height} fill="#dcefff" listening={false} />
                     {baseImage && (
-                      <KonvaImage
+                      <EditableBaseImage
                         image={baseImage}
-                        width={documentSize.width}
-                        height={documentSize.height}
-                        crop={baseCrop}
-                        listening={false}
+                        documentSize={documentSize}
+                        placement={normalizedBaseImagePlacement}
+                        isInteractive={!activeCropDraft && tool === 'select'}
+                        isSelected={isBaseImageSelected && tool === 'select'}
+                        onSelect={() => {
+                          if (tool !== 'select') return
+                          setCropDraft(null)
+                          setSelectedId(BASE_IMAGE_ID)
+                          setSidePanel('properties')
+                          setStatus('Foto principal selecionada. Arraste para reposicionar.')
+                        }}
+                        onChange={(nextPlacement) => updateBaseImagePlacement(nextPlacement)}
                       />
                     )}
                   </Layer>
@@ -1705,6 +2474,39 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                         />
                       )
                     })}
+                  </Layer>
+                  <Layer listening={false}>
+                    <AreaSelectionOverlay selection={areaSelection} />
+                    {penPoints.length > 0 && (
+                      <>
+                        <Line
+                          name="editor-selection-guide"
+                          points={penPoints}
+                          stroke="#146db7"
+                          strokeWidth={4}
+                          dash={[10, 7]}
+                          lineJoin="round"
+                          listening={false}
+                        />
+                        {penPoints.reduce((points, coordinate, index) => {
+                          if (index % 2 !== 0) return points
+                          points.push(
+                            <Circle
+                              key={`${coordinate}-${penPoints[index + 1]}-${index}`}
+                              name="editor-selection-guide"
+                              x={coordinate}
+                              y={penPoints[index + 1]}
+                              radius={6}
+                              fill="#fff7e8"
+                              stroke="#25232b"
+                              strokeWidth={2}
+                              listening={false}
+                            />,
+                          )
+                          return points
+                        }, [])}
+                      </>
+                    )}
                   </Layer>
                 </Stage>
               </div>
@@ -1846,6 +2648,8 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                         onClick={() => {
                           if (element.visible === false) return
                           setCropDraft(null)
+                          setAreaSelection(null)
+                          setPenPoints([])
                           setSelectedId(element.id)
                           setTool('select')
                           setSidePanel('properties')
@@ -1877,11 +2681,23 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                     </div>
                   )
                 })}
-                <div className="layer-item is-background">
-                  <div className="layer-select">
+                <div className={`layer-item is-background${isBaseImageSelected ? ' is-selected' : ''}`}>
+                  <button
+                    className="layer-select"
+                    type="button"
+                    onClick={() => {
+                      setCropDraft(null)
+                      setAreaSelection(null)
+                      setPenPoints([])
+                      setSelectedId(BASE_IMAGE_ID)
+                      setTool('select')
+                      setSidePanel('properties')
+                      setStatus('Foto principal selecionada. Arraste para reposicionar.')
+                    }}
+                  >
                     <span className="layer-kind" aria-hidden="true">▧</span>
-                    <span>Imagem-base</span>
-                  </div>
+                    <span>Foto principal</span>
+                  </button>
                   <button
                     className="layer-action"
                     type="button"
@@ -1895,10 +2711,10 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                     className="layer-action"
                     type="button"
                     aria-label="A camada base está bloqueada"
-                    title="Bloqueada"
+                    title="Use a ferramenta Mover"
                     disabled
                   >
-                    ◆
+                    ↔
                   </button>
                 </div>
               </div>
@@ -1979,6 +2795,109 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                 </div>
               )}
 
+              {['marquee', 'lasso', 'magic-wand', 'crop'].includes(tool) && (
+                <div className="property-group selection-tool-panel">
+                  <div className="selection-tool-heading">
+                    <span><i className={`bi ${tool === 'marquee' ? 'bi-bounding-box' : tool === 'lasso' ? 'bi-bezier2' : tool === 'magic-wand' ? 'bi-magic' : 'bi-crop'}`} aria-hidden="true" /></span>
+                    <div>
+                      <strong>{tool === 'marquee' ? 'Seleção retangular' : tool === 'lasso' ? 'Laço livre' : tool === 'magic-wand' ? 'Varinha mágica' : 'Cortar documento'}</strong>
+                      <small>{tool === 'magic-wand' ? 'Clique numa cor conectada' : 'Arraste diretamente no canvas'}</small>
+                    </div>
+                  </div>
+
+                  {tool === 'magic-wand' && (
+                    <>
+                      <label htmlFor="magic-tolerance">Tolerância: {magicTolerance}</label>
+                      <input
+                        id="magic-tolerance"
+                        type="range"
+                        min="0"
+                        max="100"
+                        value={magicTolerance}
+                        onChange={(event) => setMagicTolerance(Number(event.target.value))}
+                      />
+                      <p className="selection-tool-note">Valores maiores incluem mais tons parecidos.</p>
+                    </>
+                  )}
+
+                  {areaSelection?.bounds ? (
+                    <>
+                      <div className="selection-size-card" aria-live="polite">
+                        <span>Área marcada</span>
+                        <strong>{Math.round(areaSelection.bounds.width)} × {Math.round(areaSelection.bounds.height)} px</strong>
+                      </div>
+                      <div className="selection-actions">
+                        {tool === 'crop' ? (
+                          <button type="button" className="is-primary" onClick={applyDocumentCrop}>
+                            <i className="bi bi-check-lg" aria-hidden="true" /> Aplicar corte
+                          </button>
+                        ) : (
+                          <button type="button" className="is-primary" onClick={copyAreaSelectionToLayer}>
+                            <i className="bi bi-layers-fill" aria-hidden="true" /> Copiar para camada
+                          </button>
+                        )}
+                        <button type="button" onClick={() => {
+                          setAreaSelection(null)
+                          setStatus('Seleção cancelada.')
+                        }}>
+                          <i className="bi bi-x-lg" aria-hidden="true" /> Cancelar
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="selection-empty-state">
+                      {tool === 'magic-wand' ? 'Clique na região que deseja selecionar.' : 'Clique e arraste para marcar a área.'}
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {tool === 'pen' && (
+                <div className="property-group selection-tool-panel">
+                  <div className="selection-tool-heading">
+                    <span><i className="bi bi-pen-fill" aria-hidden="true" /></span>
+                    <div>
+                      <strong>Caneta vetorial</strong>
+                      <small>Clique para criar os pontos</small>
+                    </div>
+                  </div>
+                  <label htmlFor="pen-fill-color">Cor da forma</label>
+                  <input
+                    id="pen-fill-color"
+                    type="color"
+                    value={brushColor}
+                    onChange={(event) => setBrushColor(event.target.value)}
+                  />
+                  <div className="selection-size-card">
+                    <span>Pontos adicionados</span>
+                    <strong>{penPoints.length / 2}</strong>
+                  </div>
+                  <div className="selection-actions">
+                    <button
+                      type="button"
+                      className="is-primary"
+                      disabled={penPoints.length < 6}
+                      onClick={finishPenPath}
+                    >
+                      <i className="bi bi-check-lg" aria-hidden="true" /> Fechar forma
+                    </button>
+                    <button
+                      type="button"
+                      disabled={penPoints.length === 0}
+                      onClick={() => setPenPoints((current) => current.slice(0, -2))}
+                    >
+                      <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Último ponto
+                    </button>
+                    <button type="button" onClick={() => {
+                      setPenPoints([])
+                      setStatus('Traçado da caneta cancelado.')
+                    }}>
+                      <i className="bi bi-x-lg" aria-hidden="true" /> Cancelar
+                    </button>
+                  </div>
+                </div>
+              )}
+
               {tool === 'stickers' && (
                 <div className="sticker-picker">
                   <p>Escolha um sticker</p>
@@ -1998,10 +2917,118 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                 </div>
               )}
 
-              {!['brush', 'eraser', 'eyedropper', 'stickers'].includes(tool) && !selectedElement && (
+              {!['brush', 'eraser', 'eyedropper', 'stickers', 'marquee', 'lasso', 'magic-wand', 'pen', 'crop'].includes(tool) && !selectedElement && !isBaseImageSelected && (
                 <div className="empty-properties">
                   <span aria-hidden="true">↖</span>
                   <p>Selecione um elemento ou abra a aba de camadas.</p>
+                </div>
+              )}
+
+              {isBaseImageSelected && (
+                <div className="property-group base-image-properties">
+                  <div className="base-image-property-heading">
+                    <span><i className="bi bi-arrows-move" aria-hidden="true" /></span>
+                    <div>
+                      <strong>Foto principal</strong>
+                      <small>Arraste diretamente no canvas</small>
+                    </div>
+                  </div>
+
+                  <label htmlFor="base-image-scale">Tamanho da foto</label>
+                  <div className="base-image-scale-controls" aria-label="Ajustar tamanho da foto principal">
+                    <button
+                      type="button"
+                      onClick={() => adjustBaseImageScale(-0.1)}
+                      disabled={normalizedBaseImagePlacement.scale <= MIN_BASE_IMAGE_SCALE}
+                      aria-label="Diminuir foto em 10%"
+                      title="Diminuir foto em 10%"
+                    >
+                      <i className="bi bi-dash-lg" aria-hidden="true" />
+                      <span>Diminuir</span>
+                    </button>
+                    <output htmlFor="base-image-scale" aria-live="polite">
+                      {Math.round(normalizedBaseImagePlacement.scale * 100)}%
+                    </output>
+                    <button
+                      type="button"
+                      onClick={() => adjustBaseImageScale(0.1)}
+                      disabled={normalizedBaseImagePlacement.scale >= MAX_BASE_IMAGE_SCALE}
+                      aria-label="Aumentar foto em 10%"
+                      title="Aumentar foto em 10%"
+                    >
+                      <i className="bi bi-plus-lg" aria-hidden="true" />
+                      <span>Aumentar</span>
+                    </button>
+                  </div>
+                  <input
+                    id="base-image-scale"
+                    type="range"
+                    min={MIN_BASE_IMAGE_SCALE}
+                    max={MAX_BASE_IMAGE_SCALE}
+                    step="0.01"
+                    value={normalizedBaseImagePlacement.scale}
+                    onChange={(event) => updateBaseImagePlacement({
+                      ...normalizedBaseImagePlacement,
+                      scale: Number(event.target.value),
+                    }, 'Zoom da foto principal atualizado.')}
+                  />
+
+                  <div className="position-input-grid">
+                    <label htmlFor="base-image-x">
+                      Horizontal
+                      <input
+                        id="base-image-x"
+                        type="number"
+                        min={-baseHorizontalLimit}
+                        max={baseHorizontalLimit}
+                        value={Math.round(normalizedBaseImagePlacement.offsetX)}
+                        onChange={(event) => updateBaseImagePlacement({
+                          ...normalizedBaseImagePlacement,
+                          offsetX: Number(event.target.value),
+                        })}
+                      />
+                    </label>
+                    <label htmlFor="base-image-y">
+                      Vertical
+                      <input
+                        id="base-image-y"
+                        type="number"
+                        min={-baseVerticalLimit}
+                        max={baseVerticalLimit}
+                        value={Math.round(normalizedBaseImagePlacement.offsetY)}
+                        onChange={(event) => updateBaseImagePlacement({
+                          ...normalizedBaseImagePlacement,
+                          offsetY: Number(event.target.value),
+                        })}
+                      />
+                    </label>
+                  </div>
+
+                  <p className="move-shortcut-note">
+                    <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> move 1 px · <kbd>Shift</kbd> move 10 px
+                  </p>
+
+                  <div className="base-image-actions">
+                    <button
+                      type="button"
+                      onClick={() => updateBaseImagePlacement({
+                        ...normalizedBaseImagePlacement,
+                        offsetX: 0,
+                        offsetY: 0,
+                      }, 'Foto principal centralizada.')}
+                    >
+                      <i className="bi bi-bullseye" aria-hidden="true" /> Centralizar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => updateBaseImagePlacement(
+                        DEFAULT_BASE_IMAGE_PLACEMENT,
+                        'Posição da foto principal restaurada.',
+                      )}
+                    >
+                      <i className="bi bi-arrow-counterclockwise" aria-hidden="true" /> Restaurar
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -2239,6 +3266,46 @@ function EditorScreen({ baseImageSource = '/sample-base.svg', onBack, onFinish, 
                         onChange={(event) => updateSelected({ stroke: event.target.value })}
                       />
                     </>
+                  )}
+
+                  {selectedElement.type !== 'line' && (
+                    <fieldset className="position-controls">
+                      <legend>Posição precisa</legend>
+                      <div className="position-input-grid">
+                        <label htmlFor="element-position-x">
+                          X
+                          <input
+                            id="element-position-x"
+                            type="number"
+                            value={Math.round(selectedElement.x)}
+                            onChange={(event) => updateSelected({ x: Number(event.target.value) })}
+                          />
+                        </label>
+                        <label htmlFor="element-position-y">
+                          Y
+                          <input
+                            id="element-position-y"
+                            type="number"
+                            value={Math.round(selectedElement.y)}
+                            onChange={(event) => updateSelected({ y: Number(event.target.value) })}
+                          />
+                        </label>
+                        <label htmlFor="element-rotation">
+                          Rotação
+                          <input
+                            id="element-rotation"
+                            type="number"
+                            min="-180"
+                            max="180"
+                            value={Math.round(selectedElement.rotation ?? 0)}
+                            onChange={(event) => updateSelected({ rotation: Number(event.target.value) })}
+                          />
+                        </label>
+                      </div>
+                      <p className="move-shortcut-note">
+                        Use as setas para mover 1 px ou <kbd>Shift</kbd> para 10 px.
+                      </p>
+                    </fieldset>
                   )}
 
                   <label htmlFor="element-opacity">

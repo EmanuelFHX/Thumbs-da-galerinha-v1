@@ -1,6 +1,7 @@
 import { signInAnonymously } from 'firebase/auth'
 import {
   collection,
+  deleteField,
   doc,
   getDocs,
   onSnapshot,
@@ -10,7 +11,11 @@ import {
 } from 'firebase/firestore'
 import { firebaseAuth, firebaseAuthReady, firestore } from './firebase.js'
 import { firebaseEnabled } from './firebaseConfig.js'
-import { MAX_ROOM_PLAYERS } from './roomConstants.js'
+import {
+  MAX_ROOM_PLAYERS,
+  ROOM_PRESENCE_HEARTBEAT_MS,
+  ROOM_PRESENCE_TIMEOUT_MS,
+} from './roomConstants.js'
 import { DEFAULT_ROOM_SETTINGS, normalizeRoomSettings } from './roomSettings.js'
 
 export class RoomError extends Error {
@@ -43,6 +48,7 @@ function createPlayerPayload(identity, isHost, usernameKey) {
     avatarId: identity.avatarId,
     isHost,
     joinedAt: serverTimestamp(),
+    lastSeenAt: serverTimestamp(),
     ready: true,
     username: identity.username,
     usernameKey,
@@ -91,7 +97,7 @@ export async function joinRoom(roomCode, identity) {
   const usernameKey = getUsernameKey(identity.username)
   const usernameRef = doc(firestore, 'rooms', roomCode, 'usernames', usernameKey)
 
-  const isHost = await runTransaction(firestore, async (transaction) => {
+  const result = await runTransaction(firestore, async (transaction) => {
     const roomSnapshot = await transaction.get(roomRef)
     const playerSnapshot = await transaction.get(playerRef)
     const usernameSnapshot = await transaction.get(usernameRef)
@@ -102,6 +108,20 @@ export async function joinRoom(roomCode, identity) {
 
     const room = roomSnapshot.data()
     const returningPlayer = playerSnapshot.exists()
+    const playerIsHost = room.hostId === user.uid
+
+    if (returningPlayer && room.status !== 'lobby') {
+      const savedPlayer = playerSnapshot.data()
+      return {
+        identity: {
+          avatarId: savedPlayer.avatarId,
+          username: savedPlayer.username,
+        },
+        isHost: playerIsHost,
+        isReturningActive: true,
+      }
+    }
+
     const previousUsernameKey = playerSnapshot.data()?.usernameKey
     const previousUsernameRef = previousUsernameKey && previousUsernameKey !== usernameKey
       ? doc(firestore, 'rooms', roomCode, 'usernames', previousUsernameKey)
@@ -121,7 +141,6 @@ export async function joinRoom(roomCode, identity) {
       throw new RoomError('username-in-use', 'Esse username já está sendo usado na sala.')
     }
 
-    const playerIsHost = room.hostId === user.uid
     transaction.set(playerRef, createPlayerPayload(identity, playerIsHost, usernameKey), { merge: true })
     transaction.set(usernameRef, { playerId: user.uid })
 
@@ -134,10 +153,105 @@ export async function joinRoom(roomCode, identity) {
       })
     }
 
-    return playerIsHost
+    return { identity, isHost: playerIsHost, isReturningActive: false }
   })
 
-  return { ...identity, id: user.uid, isHost }
+  return {
+    ...result.identity,
+    id: user.uid,
+    isHost: result.isHost,
+    isReturningActive: result.isReturningActive,
+  }
+}
+
+function timestampInMilliseconds(timestamp) {
+  if (Number.isFinite(timestamp?.toMillis?.())) return timestamp.toMillis()
+  if (timestamp instanceof Date) return timestamp.getTime()
+  return null
+}
+
+function withPresence(player, now = Date.now()) {
+  const lastSeenAt = timestampInMilliseconds(player.lastSeenAt)
+    ?? timestampInMilliseconds(player.joinedAt)
+
+  return {
+    ...player,
+    isActive: lastSeenAt === null || now - lastSeenAt <= ROOM_PRESENCE_TIMEOUT_MS,
+  }
+}
+
+function comparePlayerAge(first, second) {
+  const firstJoinedAt = timestampInMilliseconds(first.joinedAt) ?? Number.MAX_SAFE_INTEGER
+  const secondJoinedAt = timestampInMilliseconds(second.joinedAt) ?? Number.MAX_SAFE_INTEGER
+  return firstJoinedAt - secondJoinedAt || first.id.localeCompare(second.id)
+}
+
+export function getActivePlayers(players) {
+  return players.filter((player) => player.isActive !== false).sort(comparePlayerAge)
+}
+
+export async function claimRoomHost(roomCode, expectedHostId) {
+  const user = await getAnonymousUser()
+  const roomRef = doc(firestore, 'rooms', roomCode)
+
+  await runTransaction(firestore, async (transaction) => {
+    const roomSnapshot = await transaction.get(roomRef)
+
+    if (!roomSnapshot.exists()) {
+      throw new RoomError('room-not-found', 'A sala não existe mais.')
+    }
+
+    const room = roomSnapshot.data()
+    if (room.hostId !== expectedHostId || room.hostId === user.uid) return
+
+    transaction.update(roomRef, {
+      hostId: user.uid,
+      updatedAt: serverTimestamp(),
+    })
+  })
+}
+
+export function startRoomPresence(roomCode, onError) {
+  if (!firebaseEnabled) return () => {}
+
+  let isStopped = false
+  let isUpdating = false
+
+  const updatePresence = async () => {
+    if (isStopped || isUpdating) return
+    isUpdating = true
+
+    try {
+      const user = await getAnonymousUser()
+      if (isStopped) return
+      await updateDoc(doc(firestore, 'rooms', roomCode, 'players', user.uid), {
+        lastSeenAt: serverTimestamp(),
+      })
+    } catch (error) {
+      if (!isStopped) onError?.(error)
+    } finally {
+      isUpdating = false
+    }
+  }
+
+  const handleVisibilityChange = () => {
+    if (document.visibilityState === 'visible') updatePresence()
+  }
+  const handleOnline = () => updatePresence()
+  const heartbeat = window.setInterval(updatePresence, ROOM_PRESENCE_HEARTBEAT_MS)
+
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  window.addEventListener('focus', updatePresence)
+  window.addEventListener('online', handleOnline)
+  updatePresence()
+
+  return () => {
+    isStopped = true
+    window.clearInterval(heartbeat)
+    document.removeEventListener('visibilitychange', handleVisibilityChange)
+    window.removeEventListener('focus', updatePresence)
+    window.removeEventListener('online', handleOnline)
+  }
 }
 
 export async function updateRoomSettings(roomCode, settings) {
@@ -158,10 +272,16 @@ export function subscribeToRoom(roomCode, onChange, onError) {
   const roomRef = doc(firestore, 'rooms', roomCode)
   const playersRef = collection(firestore, 'rooms', roomCode, 'players')
   let room = null
-  let players = []
+  let rawPlayers = []
 
   const emit = () => {
-    if (room) onChange({ players, room })
+    if (room) onChange({
+      players: rawPlayers.map((player) => withPresence({
+        ...player,
+        isHost: player.id === room.hostId,
+      })),
+      room,
+    })
   }
 
   const stopRoomListener = onSnapshot(roomRef, (snapshot) => {
@@ -175,13 +295,19 @@ export function subscribeToRoom(roomCode, onChange, onError) {
   }, onError)
 
   const stopPlayersListener = onSnapshot(playersRef, (snapshot) => {
-    players = snapshot.docs
-      .map((playerDocument) => ({ id: playerDocument.id, ...playerDocument.data() }))
+    rawPlayers = snapshot.docs
+      .map((playerDocument) => ({
+        id: playerDocument.id,
+        ...playerDocument.data({ serverTimestamps: 'estimate' }),
+      }))
       .sort((first, second) => Number(second.isHost) - Number(first.isHost))
     emit()
   }, onError)
 
+  const presenceClock = window.setInterval(emit, 5_000)
+
   return () => {
+    window.clearInterval(presenceClock)
     stopRoomListener()
     stopPlayersListener()
   }
@@ -203,14 +329,23 @@ export async function startRoom(roomCode) {
     }
 
     transaction.update(roomRef, {
+      roundNumber: 1,
+      scores: {},
       status: 'image-submission',
       updatedAt: serverTimestamp(),
     })
   })
 }
 
-export function subscribeToBaseImages(roomCode, onChange, onError) {
-  const imagesRef = collection(firestore, 'rooms', roomCode, 'baseImages')
+export function subscribeToBaseImages(roomCode, roundNumber, onChange, onError) {
+  const imagesRef = collection(
+    firestore,
+    'rooms',
+    roomCode,
+    'rounds',
+    String(roundNumber),
+    'baseImages',
+  )
 
   return onSnapshot(imagesRef, (snapshot) => {
     onChange(snapshot.docs.map((imageDocument) => ({
@@ -220,7 +355,7 @@ export function subscribeToBaseImages(roomCode, onChange, onError) {
   }, onError)
 }
 
-export async function submitBaseImage(roomCode, imageData) {
+export async function submitBaseImage(roomCode, roundNumber, imageData) {
   const user = await getAnonymousUser()
 
   await runTransaction(firestore, async (transaction) => {
@@ -231,7 +366,15 @@ export async function submitBaseImage(roomCode, imageData) {
       throw new RoomError('phase-ended', 'A etapa de envio já terminou.')
     }
 
-    transaction.set(doc(firestore, 'rooms', roomCode, 'baseImages', user.uid), {
+    transaction.set(doc(
+      firestore,
+      'rooms',
+      roomCode,
+      'rounds',
+      String(roundNumber),
+      'baseImages',
+      user.uid,
+    ), {
       imageData,
       submittedAt: serverTimestamp(),
     })
@@ -248,8 +391,15 @@ export async function startImageVoting(roomCode) {
   })
 }
 
-export function subscribeToBaseImageVotes(roomCode, onChange, onError) {
-  const votesRef = collection(firestore, 'rooms', roomCode, 'baseImageVotes')
+export function subscribeToBaseImageVotes(roomCode, roundNumber, onChange, onError) {
+  const votesRef = collection(
+    firestore,
+    'rooms',
+    roomCode,
+    'rounds',
+    String(roundNumber),
+    'baseImageVotes',
+  )
 
   return onSnapshot(votesRef, (snapshot) => {
     onChange(snapshot.docs.map((voteDocument) => ({
@@ -259,12 +409,20 @@ export function subscribeToBaseImageVotes(roomCode, onChange, onError) {
   }, onError)
 }
 
-export async function voteForBaseImage(roomCode, imageId) {
+export async function voteForBaseImage(roomCode, roundNumber, imageId) {
   const user = await getAnonymousUser()
 
   await runTransaction(firestore, async (transaction) => {
     const roomRef = doc(firestore, 'rooms', roomCode)
-    const imageRef = doc(firestore, 'rooms', roomCode, 'baseImages', imageId)
+    const imageRef = doc(
+      firestore,
+      'rooms',
+      roomCode,
+      'rounds',
+      String(roundNumber),
+      'baseImages',
+      imageId,
+    )
     const roomSnapshot = await transaction.get(roomRef)
     const imageSnapshot = await transaction.get(imageRef)
 
@@ -272,17 +430,26 @@ export async function voteForBaseImage(roomCode, imageId) {
       throw new RoomError('invalid-vote', 'Essa imagem não está disponível para votação.')
     }
 
-    transaction.set(doc(firestore, 'rooms', roomCode, 'baseImageVotes', user.uid), {
+    transaction.set(doc(
+      firestore,
+      'rooms',
+      roomCode,
+      'rounds',
+      String(roundNumber),
+      'baseImageVotes',
+      user.uid,
+    ), {
       imageId,
       votedAt: serverTimestamp(),
     })
   })
 }
 
-export async function finishBaseImageVoting(roomCode) {
+export async function finishBaseImageVoting(roomCode, roundNumber) {
   const user = await getAnonymousUser()
-  const imagesSnapshot = await getDocs(collection(firestore, 'rooms', roomCode, 'baseImages'))
-  const votesSnapshot = await getDocs(collection(firestore, 'rooms', roomCode, 'baseImageVotes'))
+  const roundPath = ['rooms', roomCode, 'rounds', String(roundNumber)]
+  const imagesSnapshot = await getDocs(collection(firestore, ...roundPath, 'baseImages'))
+  const votesSnapshot = await getDocs(collection(firestore, ...roundPath, 'baseImageVotes'))
   const images = imagesSnapshot.docs.map((imageDocument) => ({
     id: imageDocument.id,
     ...imageDocument.data(),
@@ -309,4 +476,70 @@ export async function finishBaseImageVoting(roomCode) {
   })
 
   return { userId: user.uid, winner }
+}
+
+export async function startNextRound(roomCode, currentRoundNumber) {
+  const user = await getAnonymousUser()
+  const roomRef = doc(firestore, 'rooms', roomCode)
+
+  await runTransaction(firestore, async (transaction) => {
+    const roomSnapshot = await transaction.get(roomRef)
+    const room = roomSnapshot.data()
+
+    if (!roomSnapshot.exists()) {
+      throw new RoomError('room-not-found', 'A sala não existe mais.')
+    }
+
+    if (room.hostId !== user.uid) {
+      throw new RoomError('host-only', 'Somente o host pode iniciar a próxima rodada.')
+    }
+
+    if (room.status !== 'round-results' || room.roundNumber !== currentRoundNumber) {
+      throw new RoomError('invalid-phase', 'A rodada já avançou ou ainda não terminou.')
+    }
+
+    if (currentRoundNumber >= room.settings.rounds) {
+      throw new RoomError('match-complete', 'Essa já foi a última rodada.')
+    }
+
+    transaction.update(roomRef, {
+      roundNumber: currentRoundNumber + 1,
+      roundWinnerId: deleteField(),
+      selectedImageData: deleteField(),
+      selectedImageId: deleteField(),
+      status: 'image-submission',
+      updatedAt: serverTimestamp(),
+    })
+  })
+}
+
+export async function finishMatch(roomCode, currentRoundNumber) {
+  const user = await getAnonymousUser()
+  const roomRef = doc(firestore, 'rooms', roomCode)
+
+  await runTransaction(firestore, async (transaction) => {
+    const roomSnapshot = await transaction.get(roomRef)
+    const room = roomSnapshot.data()
+
+    if (!roomSnapshot.exists()) {
+      throw new RoomError('room-not-found', 'A sala não existe mais.')
+    }
+
+    if (room.hostId !== user.uid) {
+      throw new RoomError('host-only', 'Somente o host pode encerrar a partida.')
+    }
+
+    if (
+      room.status !== 'round-results'
+      || room.roundNumber !== currentRoundNumber
+      || currentRoundNumber !== room.settings.rounds
+    ) {
+      throw new RoomError('invalid-phase', 'Ainda existem rodadas para jogar.')
+    }
+
+    transaction.update(roomRef, {
+      status: 'match-results',
+      updatedAt: serverTimestamp(),
+    })
+  })
 }

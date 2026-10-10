@@ -1,8 +1,10 @@
 const EDITOR_MUSIC_SOURCE = '/audio/editor-music.mp3'
+const SESSION_MUSIC_VOLUME = 0.011
 const EDITOR_MUSIC_VOLUME = 0.22
 
 let editorMusic = null
 let editorMusicUnlocked = false
+let sessionMusicSuspended = false
 let interfaceAudioContext = null
 
 function getInterfaceAudioContext() {
@@ -59,13 +61,13 @@ export function armEditorMusicAutoplay() {
   }
 
   function unlock() {
-    if (!active || editorMusicUnlocked) return
+    if (!active || editorMusicUnlocked || sessionMusicSuspended) return
     const music = getEditorMusic()
     if (!music) return
 
     const previousVolume = music.volume
     music.muted = false
-    music.volume = 0.001
+    music.volume = SESSION_MUSIC_VOLUME
     music.currentTime = 0
     music.play()
       .then(() => {
@@ -168,11 +170,21 @@ export function startEditorMusic() {
   const music = getEditorMusic()
   if (!music) return Promise.reject(new Error('Áudio indisponível.'))
 
+  sessionMusicSuspended = false
   music.loop = true
   music.muted = false
   music.volume = EDITOR_MUSIC_VOLUME
   music.currentTime = 0
   return music.paused ? music.play() : Promise.resolve()
+}
+
+export function pauseSessionMusic() {
+  const music = getEditorMusic()
+  if (!music) return
+
+  sessionMusicSuspended = true
+  music.pause()
+  music.currentTime = 0
 }
 
 export function setEditorMusicMuted(muted) {
@@ -193,8 +205,9 @@ export function stopEditorMusic() {
   const music = getEditorMusic()
   if (!music) return
 
+  sessionMusicSuspended = false
   if (editorMusicUnlocked && !music.muted) {
-    music.volume = 0.001
+    music.volume = SESSION_MUSIC_VOLUME
   } else {
     music.pause()
   }

@@ -9,6 +9,8 @@ function BaseImageVoteScreen({
   onVote,
   playerId,
   roomCode,
+  roundNumber,
+  totalRounds,
   totalPlayers,
   votes,
 }) {
@@ -27,7 +29,7 @@ function BaseImageVoteScreen({
 
       <section className="image-vote-layout" aria-labelledby="image-vote-title">
         <div className="image-vote-heading">
-          <span className="step-sticker">Etapa 2 de 2</span>
+          <span className="step-sticker">Rodada {roundNumber}/{totalRounds} · Etapa 2 de 2</span>
           <p className="session-eyebrow">Escolha da galera</p>
           <h1 id="image-vote-title">Qual imagem vai pro editor?</h1>
           <p>Os autores ficam escondidos. Escolha a imagem com mais potencial para o caos.</p>
