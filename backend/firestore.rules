@@ -18,8 +18,8 @@ service cloud.firestore {
       return /databases/$(database)/documents/rooms/$(roomCode);
     }
 
-    function baseImagePath(roomCode, imageId) {
-      return /databases/$(database)/documents/rooms/$(roomCode)/baseImages/$(imageId);
+    function baseImagePath(roomCode, roundNumber, imageId) {
+      return /databases/$(database)/documents/rooms/$(roomCode)/rounds/$(roundNumber)/baseImages/$(imageId);
     }
 
     function roundSubmissionPath(roomCode, roundNumber, playerId) {
@@ -39,6 +39,7 @@ service cloud.firestore {
           'avatarId',
           'isHost',
           'joinedAt',
+          'lastSeenAt',
           'ready',
           'username',
           'usernameKey'
@@ -47,6 +48,7 @@ service cloud.firestore {
           'avatarId',
           'isHost',
           'joinedAt',
+          'lastSeenAt',
           'ready',
           'username',
           'usernameKey'
@@ -56,6 +58,7 @@ service cloud.firestore {
         && data.avatarId.size() <= 32
         && data.isHost is bool
         && data.joinedAt == request.time
+        && data.lastSeenAt == request.time
         && data.ready == true
         && data.username is string
         && data.username.size() >= 2
@@ -79,7 +82,7 @@ service cloud.firestore {
           'rounds',
           'votesPerPlayer'
         ])
-        && settings.editDurationSeconds in [120, 240, 360]
+        && settings.editDurationSeconds in [120, 240, 360, 600, 900, 1200]
         && settings.mode in ['classic', 'comedy', 'theme', 'chaos']
         && settings.rounds in [1, 3, 5]
         && settings.votesPerPlayer in [1, 2, 3];
@@ -163,9 +166,12 @@ service cloud.firestore {
           resource.data.hostId == request.auth.uid
           && resource.data.status == 'lobby'
           && request.resource.data.status == 'image-submission'
+          && request.resource.data.roundNumber == 1
+          && request.resource.data.scores is map
+          && request.resource.data.scores.size() == 0
           && request.resource.data.updatedAt == request.time
           && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['status', 'updatedAt'])
+            .hasOnly(['roundNumber', 'scores', 'status', 'updatedAt'])
         )
         ||
         (
@@ -184,9 +190,17 @@ service cloud.firestore {
           && request.resource.data.updatedAt == request.time
           && request.resource.data.selectedImageId is string
           && request.resource.data.selectedImageData is string
-          && exists(baseImagePath(roomCode, request.resource.data.selectedImageId))
+          && exists(baseImagePath(
+            roomCode,
+            resource.data.roundNumber,
+            request.resource.data.selectedImageId
+          ))
           && request.resource.data.selectedImageData
-            == get(baseImagePath(roomCode, request.resource.data.selectedImageId)).data.imageData
+            == get(baseImagePath(
+              roomCode,
+              resource.data.roundNumber,
+              request.resource.data.selectedImageId
+            )).data.imageData
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['selectedImageData', 'selectedImageId', 'status', 'updatedAt'])
         )
@@ -206,25 +220,51 @@ service cloud.firestore {
           && request.resource.data.status == 'round-results'
           && request.resource.data.updatedAt == request.time
           && request.resource.data.roundWinnerId is string
-          && request.resource.data.roundWinnerImageData is string
+          && request.resource.data.scores is map
+          && request.resource.data.scores.size() <= resource.data.maxPlayers
           && exists(roundSubmissionPath(
             roomCode,
-            '1',
+            resource.data.roundNumber,
             request.resource.data.roundWinnerId
           ))
-          && request.resource.data.roundWinnerImageData
-            == get(roundSubmissionPath(
-              roomCode,
-              '1',
-              request.resource.data.roundWinnerId
-            )).data.imageData
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly([
               'roundWinnerId',
-              'roundWinnerImageData',
+              'scores',
               'status',
               'updatedAt'
             ])
+        )
+        ||
+        (
+          resource.data.hostId == request.auth.uid
+          && resource.data.status == 'round-results'
+          && resource.data.roundNumber < resource.data.settings.rounds
+          && request.resource.data.status == 'image-submission'
+          && request.resource.data.roundNumber == resource.data.roundNumber + 1
+          && !('roundWinnerId' in request.resource.data)
+          && !('selectedImageData' in request.resource.data)
+          && !('selectedImageId' in request.resource.data)
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly([
+              'roundNumber',
+              'roundWinnerId',
+              'selectedImageData',
+              'selectedImageId',
+              'status',
+              'updatedAt'
+            ])
+        )
+        ||
+        (
+          resource.data.hostId == request.auth.uid
+          && resource.data.status == 'round-results'
+          && resource.data.roundNumber == resource.data.settings.rounds
+          && request.resource.data.status == 'match-results'
+          && request.resource.data.updatedAt == request.time
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['status', 'updatedAt'])
         )
         ||
         (
@@ -235,6 +275,16 @@ service cloud.firestore {
           && validRoomSettings(request.resource.data.settings)
           && request.resource.data.diff(resource.data).affectedKeys()
             .hasOnly(['settings', 'updatedAt'])
+        )
+        ||
+        (
+          isRoomMember(roomCode)
+          && request.resource.data.hostId == request.auth.uid
+          && request.resource.data.updatedAt == request.time
+          && get(playerPath(roomCode, resource.data.hostId)).data.lastSeenAt
+            < request.time - duration.value(75, 's')
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['hostId', 'updatedAt'])
         )
         ||
         (
@@ -271,12 +321,22 @@ service cloud.firestore {
 
         allow update: if signedIn()
           && request.auth.uid == playerId
-          && get(roomPath(roomCode)).data.status == 'lobby'
-          && validPlayer(request.resource.data)
-          && request.resource.data.isHost == resource.data.isHost
-          && existsAfter(usernamePath(roomCode, request.resource.data.usernameKey))
-          && getAfter(usernamePath(roomCode, request.resource.data.usernameKey)).data.playerId
-            == request.auth.uid;
+          && (
+            (
+              get(roomPath(roomCode)).data.status == 'lobby'
+              && validPlayer(request.resource.data)
+              && request.resource.data.isHost == resource.data.isHost
+              && existsAfter(usernamePath(roomCode, request.resource.data.usernameKey))
+              && getAfter(usernamePath(roomCode, request.resource.data.usernameKey)).data.playerId
+                == request.auth.uid
+            )
+            ||
+            (
+              request.resource.data.lastSeenAt == request.time
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(['lastSeenAt'])
+            )
+          );
 
         allow delete: if false;
       }
@@ -302,58 +362,64 @@ service cloud.firestore {
           && resource.data.playerId == request.auth.uid;
       }
 
-      match /baseImages/{playerId} {
-        allow get, list: if isRoomMember(roomCode);
+      match /rounds/{roundNumber} {
+        match /baseImages/{playerId} {
+          allow get, list: if isRoomMember(roomCode);
 
-        allow create, update: if signedIn()
-          && request.auth.uid == playerId
-          && isRoomMember(roomCode)
-          && get(roomPath(roomCode)).data.status == 'image-submission'
-          && validBaseImage(request.resource.data);
+          allow create, update: if signedIn()
+            && request.auth.uid == playerId
+            && isRoomMember(roomCode)
+            && get(roomPath(roomCode)).data.status == 'image-submission'
+            && int(roundNumber) == get(roomPath(roomCode)).data.roundNumber
+            && validBaseImage(request.resource.data);
 
-        allow delete: if false;
-      }
+          allow delete: if false;
+        }
 
-      match /baseImageVotes/{voterId} {
-        allow get, list: if isRoomMember(roomCode);
+        match /baseImageVotes/{voterId} {
+          allow get, list: if isRoomMember(roomCode);
 
-        allow create, update: if signedIn()
-          && request.auth.uid == voterId
-          && isRoomMember(roomCode)
-          && get(roomPath(roomCode)).data.status == 'image-voting'
-          && request.resource.data.keys().hasAll(['imageId', 'votedAt'])
-          && request.resource.data.keys().hasOnly(['imageId', 'votedAt'])
-          && request.resource.data.imageId is string
-          && exists(baseImagePath(roomCode, request.resource.data.imageId))
-          && request.resource.data.votedAt == request.time;
+          allow create, update: if signedIn()
+            && request.auth.uid == voterId
+            && isRoomMember(roomCode)
+            && get(roomPath(roomCode)).data.status == 'image-voting'
+            && int(roundNumber) == get(roomPath(roomCode)).data.roundNumber
+            && request.resource.data.keys().hasAll(['imageId', 'votedAt'])
+            && request.resource.data.keys().hasOnly(['imageId', 'votedAt'])
+            && request.resource.data.imageId is string
+            && exists(baseImagePath(roomCode, roundNumber, request.resource.data.imageId))
+            && request.resource.data.votedAt == request.time;
 
-        allow delete: if false;
-      }
+          allow delete: if false;
+        }
 
-      match /rounds/{roundNumber}/submissions/{playerId} {
-        allow get, list: if isRoomMember(roomCode);
+        match /submissions/{playerId} {
+          allow get, list: if isRoomMember(roomCode);
 
-        allow create, update: if signedIn()
-          && request.auth.uid == playerId
-          && isRoomMember(roomCode)
-          && get(roomPath(roomCode)).data.status == 'editing'
-          && roundNumber.matches('^[1-5]$')
-          && validSubmission(request.resource.data);
+          allow create, update: if signedIn()
+            && request.auth.uid == playerId
+            && isRoomMember(roomCode)
+            && get(roomPath(roomCode)).data.status == 'editing'
+            && roundNumber.matches('^[1-5]$')
+            && int(roundNumber) == get(roomPath(roomCode)).data.roundNumber
+            && validSubmission(request.resource.data);
 
-        allow delete: if false;
-      }
+          allow delete: if false;
+        }
 
-      match /rounds/{roundNumber}/votes/{voterId} {
-        allow get, list: if isRoomMember(roomCode);
+        match /votes/{voterId} {
+          allow get, list: if isRoomMember(roomCode);
 
-        allow create, update: if signedIn()
-          && request.auth.uid == voterId
-          && isRoomMember(roomCode)
-          && get(roomPath(roomCode)).data.status == 'thumb-voting'
-          && roundNumber.matches('^[1-5]$')
-          && validRoundVote(roomCode, roundNumber, request.resource.data);
+          allow create, update: if signedIn()
+            && request.auth.uid == voterId
+            && isRoomMember(roomCode)
+            && get(roomPath(roomCode)).data.status == 'thumb-voting'
+            && roundNumber.matches('^[1-5]$')
+            && int(roundNumber) == get(roomPath(roomCode)).data.roundNumber
+            && validRoundVote(roomCode, roundNumber, request.resource.data);
 
-        allow delete: if false;
+          allow delete: if false;
+        }
       }
     }
   }
