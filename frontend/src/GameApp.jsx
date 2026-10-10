@@ -76,6 +76,7 @@ function GameApp() {
   const [roomCode, setRoomCode] = useState('')
   const [players, setPlayers] = useState([])
   const [roomError, setRoomError] = useState('')
+  const [showOpeningNotice, setShowOpeningNotice] = useState(initialRoute.screen === 'menu')
   const [isSubmittingIdentity, setIsSubmittingIdentity] = useState(false)
   const [isStartingRoom, setIsStartingRoom] = useState(false)
   const [isSavingSettings, setIsSavingSettings] = useState(false)
@@ -103,6 +104,7 @@ function GameApp() {
   const currentRoundNumberRef = useRef(1)
   const resumingActiveRoomRef = useRef(false)
   const hostClaimRef = useRef('')
+  const openingNoticeButtonRef = useRef(null)
 
   const normalizedCode = roomCode.trim().toUpperCase()
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
@@ -118,6 +120,33 @@ function GameApp() {
       disarmInterfaceSounds()
     }
   }, [])
+
+  useEffect(() => {
+    if (!showOpeningNotice) return undefined
+
+    const previousOverflow = document.body.style.overflow
+    const focusFrame = window.requestAnimationFrame(() => openingNoticeButtonRef.current?.focus())
+    const keepFocusInsideNotice = (event) => {
+      if (event.key === 'Escape') {
+        setShowOpeningNotice(false)
+        return
+      }
+
+      if (event.key === 'Tab') {
+        event.preventDefault()
+        openingNoticeButtonRef.current?.focus()
+      }
+    }
+
+    document.body.style.overflow = 'hidden'
+    document.addEventListener('keydown', keepFocusInsideNotice)
+
+    return () => {
+      window.cancelAnimationFrame(focusFrame)
+      document.body.style.overflow = previousOverflow
+      document.removeEventListener('keydown', keepFocusInsideNotice)
+    }
+  }, [showOpeningNotice])
 
   useEffect(() => {
     if (!firebaseEnabled || !player.id || ['menu', 'identity'].includes(screen)) return undefined
@@ -1085,14 +1114,55 @@ function GameApp() {
     <main className="game-shell">
       <div className="paper-noise" aria-hidden="true" />
 
-      <header className="topbar">
+      {showOpeningNotice && (
+        <div className="image-prep-notice-backdrop">
+          <section
+            className="image-prep-notice-card"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="image-prep-notice-title"
+            aria-describedby="image-prep-notice-description"
+          >
+            <span className="image-prep-notice-tape" aria-hidden="true" />
+            <div className="image-prep-notice-art" aria-hidden="true">
+              <span><i className="bi bi-image" /></span>
+              <span><i className="bi bi-images" /></span>
+              <i className="bi bi-stars" />
+            </div>
+            <p className="image-prep-notice-kicker">Antes da partida</p>
+            <h2 id="image-prep-notice-title">Separe suas imagens!</h2>
+            <p id="image-prep-notice-description">
+              Neste jogo, cada pessoa escolhe e envia suas próprias imagens para a rodada.
+              Para a partida fluir sem pausas, deixe algumas opções legais separadas com antecedência.
+            </p>
+            <div className="image-prep-notice-tip">
+              <i className="bi bi-lightbulb-fill" aria-hidden="true" />
+              <span><strong>Dica:</strong> prepare pelo menos uma imagem para cada rodada.</span>
+            </div>
+            <button
+              ref={openingNoticeButtonRef}
+              type="button"
+              onClick={() => setShowOpeningNotice(false)}
+            >
+              Entendi, bora jogar! <i className="bi bi-arrow-right" aria-hidden="true" />
+            </button>
+          </section>
+        </div>
+      )}
+
+      <header className="topbar" inert={showOpeningNotice ? true : undefined} aria-hidden={showOpeningNotice || undefined}>
         <span className="prototype-stamp">Protótipo</span>
         <button className="sound-button" type="button" aria-label="Configurações de som">
           Som: ligado
         </button>
       </header>
 
-      <section className="menu" aria-labelledby="game-title">
+      <section
+        className="menu"
+        aria-labelledby="game-title"
+        inert={showOpeningNotice ? true : undefined}
+        aria-hidden={showOpeningNotice || undefined}
+      >
         <div className="brand-block">
           <span className="doodle doodle-star" aria-hidden="true">✦</span>
           <span className="doodle doodle-arrow" aria-hidden="true">↝</span>
@@ -1153,7 +1223,11 @@ function GameApp() {
         </div>
       </section>
 
-      <footer className="footer-note">
+      <footer
+        className="footer-note"
+        inert={showOpeningNotice ? true : undefined}
+        aria-hidden={showOpeningNotice || undefined}
+      >
         <span aria-hidden="true">✎</span>
         <p>Um jogo de edição criativa para a galera toda.</p>
       </footer>
