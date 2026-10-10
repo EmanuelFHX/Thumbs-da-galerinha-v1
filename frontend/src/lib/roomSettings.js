@@ -6,7 +6,7 @@ export const ROOM_MODES = [
 ]
 
 export const ROUND_OPTIONS = [1, 3, 5]
-export const EDIT_DURATION_OPTIONS = [120, 240, 360]
+export const EDIT_DURATION_OPTIONS = [120, 240, 360, 600, 900, 1200]
 export const VOTE_OPTIONS = [1, 2, 3]
 
 export const DEFAULT_ROOM_SETTINGS = Object.freeze({

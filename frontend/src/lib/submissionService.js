@@ -2,6 +2,7 @@ import { signInAnonymously } from 'firebase/auth'
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   onSnapshot,
   serverTimestamp,
@@ -107,6 +108,15 @@ export async function submitRoundVote(roomCode, roundNumber, submissionIds) {
 export async function finishRoundVoting(roomCode, roundNumber) {
   await getCurrentUser()
 
+  const roomRef = doc(firestore, 'rooms', roomCode)
+  const roomSnapshot = await getDoc(roomRef)
+  if (!roomSnapshot.exists()) throw new Error('Essa sala não existe mais.')
+
+  const room = roomSnapshot.data()
+  if (room.status !== 'thumb-voting' || room.roundNumber !== roundNumber) {
+    throw new Error('A votação desta rodada já foi encerrada.')
+  }
+
   const submissionsSnapshot = await getDocs(collection(
     firestore,
     'rooms',
@@ -142,9 +152,14 @@ export async function finishRoundVoting(roomCode, roundNumber) {
     return voteDifference || first.id.localeCompare(second.id)
   })[0]
 
-  await updateDoc(doc(firestore, 'rooms', roomCode), {
+  const scores = { ...(room?.scores ?? {}) }
+  totals.forEach((points, playerId) => {
+    scores[playerId] = (scores[playerId] ?? 0) + points
+  })
+
+  await updateDoc(roomRef, {
     roundWinnerId: winner.id,
-    roundWinnerImageData: winner.imageData,
+    scores,
     status: 'round-results',
     updatedAt: serverTimestamp(),
   })

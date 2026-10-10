@@ -46,6 +46,7 @@ function LobbyScreen({
   settings,
 }) {
   const roomPlayers = players.length ? players : [{ ...player, isHost }]
+  const activePlayerCount = roomPlayers.filter((roomPlayer) => roomPlayer.isActive !== false).length
   const emptySlots = Math.max(0, MAX_ROOM_PLAYERS - roomPlayers.length)
   const selectedMode = getMode(settings.mode)
 
@@ -87,17 +88,29 @@ function LobbyScreen({
           <section className="players-board" aria-labelledby="players-title">
             <div className="board-heading">
               <h2 id="players-title">Jogadores</h2>
-              <span>{roomPlayers.length}/{MAX_ROOM_PLAYERS}</span>
+              <span>{activePlayerCount} online · {roomPlayers.length}/{MAX_ROOM_PLAYERS}</span>
             </div>
             <div className="players-grid">
               {roomPlayers.map((roomPlayer) => (
-                <article className="player-card is-ready" key={roomPlayer.id ?? roomPlayer.username}>
+                <article
+                  className={`player-card ${roomPlayer.isActive === false ? 'is-away' : 'is-ready'}`}
+                  key={roomPlayer.id ?? roomPlayer.username}
+                >
                   <PlayerAvatar avatarId={roomPlayer.avatarId} />
                   <div>
                     <strong>{roomPlayer.username}</strong>
-                    <span>{roomPlayer.isHost ? 'Host da sala' : 'Pronto para jogar'}</span>
+                    <span>
+                      {roomPlayer.isActive === false
+                        ? 'Reconectando…'
+                        : roomPlayer.isHost
+                          ? 'Host da sala'
+                          : 'Pronto para jogar'}
+                    </span>
                   </div>
-                  <i className="bi bi-check-circle-fill" aria-label="Pronto" />
+                  <i
+                    className={`bi ${roomPlayer.isActive === false ? 'bi-wifi-off' : 'bi-check-circle-fill'}`}
+                    aria-label={roomPlayer.isActive === false ? 'Desconectado' : 'Pronto'}
+                  />
                 </article>
               ))}
               {Array.from({ length: emptySlots }, (_, index) => index + 1).map((slot) => (

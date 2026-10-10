@@ -11,6 +11,8 @@ function BaseImageSubmitScreen({
   onSubmit,
   playerId,
   roomCode,
+  roundNumber,
+  totalRounds,
   totalPlayers,
 }) {
   const inputRef = useRef(null)
@@ -59,7 +61,7 @@ function BaseImageSubmitScreen({
 
       <section className="image-pick-layout" aria-labelledby="image-pick-title">
         <div className="image-pick-copy">
-          <span className="step-sticker">Etapa 1 de 2</span>
+          <span className="step-sticker">Rodada {roundNumber}/{totalRounds} · Etapa 1 de 2</span>
           <p className="session-eyebrow">Matéria-prima da rodada</p>
           <h1 id="image-pick-title">Manda uma imagem!</h1>
           <p>Escolha uma foto que renderia uma edição absurda. Ela entrará anonimamente na votação.</p>

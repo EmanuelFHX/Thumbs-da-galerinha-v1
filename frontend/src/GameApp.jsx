@@ -3,15 +3,19 @@ import BaseImageSubmitScreen from './components/BaseImageSubmitScreen.jsx'
 import BaseImageVoteScreen from './components/BaseImageVoteScreen.jsx'
 import ChallengeScreen from './components/ChallengeScreen.jsx'
 import IdentityScreen from './components/IdentityScreen.jsx'
+import ImageVoteTransitionScreen from './components/ImageVoteTransitionScreen.jsx'
 import LobbyScreen from './components/LobbyScreen.jsx'
 import LobbyTransitionScreen from './components/LobbyTransitionScreen.jsx'
+import MatchResultScreen from './components/MatchResultScreen.jsx'
 import RoundCompleteScreen from './components/RoundCompleteScreen.jsx'
 import RoundResultScreen from './components/RoundResultScreen.jsx'
+import RoundResultTransitionScreen from './components/RoundResultTransitionScreen.jsx'
 import RoundVoteScreen from './components/RoundVoteScreen.jsx'
 import WinnerRevealScreen from './components/WinnerRevealScreen.jsx'
 import {
   armEditorMusicAutoplay,
   armInterfaceSounds,
+  pauseSessionMusic,
   playRoomActivitySound,
 } from './lib/audioSession.js'
 import { firebaseEnabled } from './lib/firebaseConfig.js'
@@ -30,10 +34,13 @@ function getInitialRoute() {
     'identity',
     'lobby',
     'image-submit',
+    'image-vote-transition',
     'image-vote',
     'editor',
     'thumb-vote',
+    'round-result-transition',
     'round-result',
+    'match-result',
   ].includes(requestedScreen)
     ? requestedScreen
     : 'menu'
@@ -74,6 +81,8 @@ function GameApp() {
   const [isSavingSettings, setIsSavingSettings] = useState(false)
   const [roomSettings, setRoomSettings] = useState(DEFAULT_ROOM_SETTINGS)
   const [round, setRound] = useState(null)
+  const [currentRoundNumber, setCurrentRoundNumber] = useState(1)
+  const [matchScores, setMatchScores] = useState({})
   const [roundResult, setRoundResult] = useState(null)
   const [submission, setSubmission] = useState({ count: 0, error: '', status: 'idle' })
   const [baseImages, setBaseImages] = useState([])
@@ -85,14 +94,20 @@ function GameApp() {
   const [isVotingBaseImage, setIsVotingBaseImage] = useState(false)
   const [isVoting, setIsVoting] = useState(false)
   const [isFinishingVoting, setIsFinishingVoting] = useState(false)
+  const [isAdvancingRound, setIsAdvancingRound] = useState(false)
   const pendingBaseImageVoteRef = useRef(null)
   const pendingRoundVoteRef = useRef(null)
   const announcedBaseImageIdsRef = useRef(null)
   const announcedBaseVoteIdsRef = useRef(null)
   const announcedRoundVoteIdsRef = useRef(null)
+  const currentRoundNumberRef = useRef(1)
+  const resumingActiveRoomRef = useRef(false)
+  const hostClaimRef = useRef('')
 
   const normalizedCode = roomCode.trim().toUpperCase()
   const canJoin = normalizedCode.length === ROOM_CODE_LENGTH
+  const activePlayers = players.filter((currentPlayer) => currentPlayer.isActive !== false)
+  const activePlayerCount = Math.max(1, activePlayers.length)
 
   useEffect(() => {
     const disarmEditorMusic = armEditorMusicAutoplay()
@@ -103,6 +118,45 @@ function GameApp() {
       disarmInterfaceSounds()
     }
   }, [])
+
+  useEffect(() => {
+    if (!firebaseEnabled || !player.id || ['menu', 'identity'].includes(screen)) return undefined
+
+    let stopPresence = () => {}
+    let isActive = true
+
+    import('./lib/roomService.js').then(({ startRoomPresence }) => {
+      if (!isActive) return
+      stopPresence = startRoomPresence(room.code)
+    })
+
+    return () => {
+      isActive = false
+      stopPresence()
+    }
+  }, [player.id, room.code, screen])
+
+  useEffect(() => {
+    if (!firebaseEnabled || !player.id || !room.hostId || room.isHost) return
+
+    const currentHost = players.find((currentPlayer) => currentPlayer.id === room.hostId)
+    const nextHost = activePlayers[0]
+    if (currentHost?.isActive !== false || nextHost?.id !== player.id) return
+
+    const claimKey = `${room.code}:${room.hostId}`
+    if (hostClaimRef.current === claimKey) return
+    hostClaimRef.current = claimKey
+
+    import('./lib/roomService.js')
+      .then(({ claimRoomHost }) => claimRoomHost(room.code, room.hostId))
+      .catch(() => {
+        hostClaimRef.current = ''
+      })
+  }, [activePlayers, player.id, players, room.code, room.hostId, room.isHost])
+
+  useEffect(() => {
+    if (screen === 'winner-reveal') pauseSessionMusic()
+  }, [screen])
 
   useEffect(() => {
     if (screen !== 'image-submit') {
@@ -117,9 +171,9 @@ function GameApp() {
 
     const hasNewSubmission = [...currentIds].some((id) => !previousIds.has(id))
     if (hasNewSubmission) {
-      playRoomActivitySound('image', currentIds.size >= Math.max(1, players.length))
+      playRoomActivitySound('image', currentIds.size >= activePlayerCount)
     }
-  }, [baseImages, players.length, screen])
+  }, [activePlayerCount, baseImages, screen])
 
   useEffect(() => {
     if (screen !== 'image-vote') {
@@ -134,9 +188,9 @@ function GameApp() {
 
     const hasNewVote = [...currentIds].some((id) => !previousIds.has(id))
     if (hasNewVote) {
-      playRoomActivitySound('vote', currentIds.size >= Math.max(1, players.length))
+      playRoomActivitySound('vote', currentIds.size >= activePlayerCount)
     }
-  }, [baseImageVotes, players.length, screen])
+  }, [activePlayerCount, baseImageVotes, screen])
 
   useEffect(() => {
     if (screen !== 'thumb-vote') {
@@ -151,20 +205,23 @@ function GameApp() {
 
     const hasNewVote = [...currentIds].some((id) => !previousIds.has(id))
     if (hasNewVote) {
-      playRoomActivitySound('vote', currentIds.size >= Math.max(1, players.length))
+      playRoomActivitySound('vote', currentIds.size >= activePlayerCount)
     }
-  }, [players.length, roundVotes, screen])
+  }, [activePlayerCount, roundVotes, screen])
 
   useEffect(() => {
     const synchronizedScreens = [
       'lobby',
       'lobby-transition',
       'image-submit',
+      'image-vote-transition',
       'image-vote',
       'winner-reveal',
       'round-complete',
       'thumb-vote',
+      'round-result-transition',
       'round-result',
+      'match-result',
     ]
     if (!firebaseEnabled || !synchronizedScreens.includes(screen)) return undefined
 
@@ -175,45 +232,113 @@ function GameApp() {
       if (!isActive) return
 
       stopListening = subscribeToRoom(room.code, ({ players: syncedPlayers, room: syncedRoom }) => {
+        const syncedRoundNumber = syncedRoom.roundNumber ?? 1
+
+        if (syncedRoundNumber !== currentRoundNumberRef.current) {
+          currentRoundNumberRef.current = syncedRoundNumber
+          setCurrentRoundNumber(syncedRoundNumber)
+          setRound(null)
+          setRoundResult(null)
+          setSubmission({ count: 0, error: '', status: 'idle' })
+          setBaseImages([])
+          setBaseImageVotes([])
+          setRoundSubmissions([])
+          setRoundVotes([])
+          setRoundOutcome(null)
+          setIsOpeningGallery(false)
+          setIsVotingBaseImage(false)
+          setIsVoting(false)
+          setIsFinishingVoting(false)
+          setIsAdvancingRound(false)
+          pendingBaseImageVoteRef.current = null
+          pendingRoundVoteRef.current = null
+        }
+
         setPlayers(syncedPlayers)
         setRoomSettings(normalizeRoomSettings(syncedRoom.settings))
+        setMatchScores(syncedRoom.scores ?? {})
         setRoomError('')
         setRoom((currentRoom) => ({
           ...currentRoom,
+          hostId: syncedRoom.hostId,
           isHost: syncedRoom.hostId === player.id,
         }))
+        const isResumingActiveRoom = resumingActiveRoomRef.current && syncedRoom.status !== 'lobby'
+        if (isResumingActiveRoom) resumingActiveRoomRef.current = false
 
         if (syncedRoom.status === 'image-submission') {
           setScreen((currentScreen) => (
-            currentScreen === 'lobby'
+            isResumingActiveRoom
+              ? 'image-submit'
+              : ['lobby', 'round-result'].includes(currentScreen)
               ? 'lobby-transition'
               : currentScreen === 'lobby-transition'
                 ? currentScreen
                 : 'image-submit'
           ))
         } else if (syncedRoom.status === 'image-voting') {
-          setScreen('image-vote')
-        } else if (syncedRoom.status === 'editing') {
-          setRound((currentRound) => currentRound ?? createRoundSession(room.code, syncedRoom))
           setScreen((currentScreen) => (
-            currentScreen === 'image-vote'
+            isResumingActiveRoom
+              ? 'image-vote'
+              : currentScreen === 'image-submit'
+              ? 'image-vote-transition'
+              : currentScreen === 'image-vote-transition'
+                ? currentScreen
+                : 'image-vote'
+          ))
+        } else if (syncedRoom.status === 'editing') {
+          const syncedRound = createRoundSession(room.code, syncedRoom)
+          const hasResolvedStart = Number.isFinite(syncedRoom.updatedAt?.toMillis?.())
+          setRound((currentRound) => {
+            if (currentRound?.number !== syncedRoundNumber) return syncedRound
+            if (hasResolvedStart && Math.abs(currentRound.startedAt - syncedRound.startedAt) > 1000) {
+              return syncedRound
+            }
+            return currentRound
+          })
+          setScreen((currentScreen) => (
+            isResumingActiveRoom
+              ? 'editor'
+              : currentScreen === 'image-vote'
               ? 'winner-reveal'
               : ['winner-reveal', 'challenge', 'editor', 'round-complete'].includes(currentScreen)
                 ? currentScreen
                 : 'challenge'
           ))
         } else if (syncedRoom.status === 'thumb-voting') {
-          setRound((currentRound) => currentRound ?? createRoundSession(room.code, syncedRoom))
+          setRound((currentRound) => (
+            currentRound?.number === syncedRoundNumber
+              ? currentRound
+              : createRoundSession(room.code, syncedRoom)
+          ))
           setIsOpeningGallery(false)
           setScreen('thumb-vote')
         } else if (syncedRoom.status === 'round-results') {
-          setRound((currentRound) => currentRound ?? createRoundSession(room.code, syncedRoom))
+          setRound((currentRound) => (
+            currentRound?.number === syncedRoundNumber
+              ? currentRound
+              : createRoundSession(room.code, syncedRoom)
+          ))
           setRoundOutcome({
             winnerId: syncedRoom.roundWinnerId,
-            winnerImageData: syncedRoom.roundWinnerImageData,
           })
           setIsFinishingVoting(false)
-          setScreen('round-result')
+          setIsAdvancingRound(false)
+          setScreen((currentScreen) => (
+            currentScreen === 'thumb-vote'
+              ? 'round-result-transition'
+              : currentScreen === 'round-result-transition'
+                ? currentScreen
+                : 'round-result'
+          ))
+        } else if (syncedRoom.status === 'match-results') {
+          setRound((currentRound) => (
+            currentRound?.number === syncedRoundNumber
+              ? currentRound
+              : createRoundSession(room.code, syncedRoom)
+          ))
+          setIsAdvancingRound(false)
+          setScreen('match-result')
         }
       }, (error) => {
         setRoomError(error.message || 'Não foi possível sincronizar a sala.')
@@ -229,7 +354,7 @@ function GameApp() {
   }, [player.id, room.code, screen])
 
   useEffect(() => {
-    if (!firebaseEnabled || !['image-submit', 'image-vote'].includes(screen)) return undefined
+    if (!firebaseEnabled || !['image-submit', 'image-vote-transition', 'image-vote'].includes(screen)) return undefined
 
     let isActive = true
     let stopListening = () => {}
@@ -238,6 +363,7 @@ function GameApp() {
       if (!isActive) return
       stopListening = subscribeToBaseImages(
         room.code,
+        currentRoundNumber,
         (syncedImages) => setBaseImages((currentImages) => {
           const currentOwnImage = currentImages.find((image) => image.id === player.id)
           const ownImageIsSynced = syncedImages.some((image) => image.id === player.id)
@@ -256,7 +382,7 @@ function GameApp() {
       isActive = false
       stopListening()
     }
-  }, [player.id, room.code, screen])
+  }, [currentRoundNumber, player.id, room.code, screen])
 
   useEffect(() => {
     if (!firebaseEnabled || screen !== 'image-vote') return undefined
@@ -268,6 +394,7 @@ function GameApp() {
       if (!isActive) return
       stopListening = subscribeToBaseImageVotes(
         room.code,
+        currentRoundNumber,
         (syncedVotes) => {
           const pendingImageId = pendingBaseImageVoteRef.current
           setBaseImageVotes(pendingImageId
@@ -287,10 +414,10 @@ function GameApp() {
       isActive = false
       stopListening()
     }
-  }, [player.id, room.code, screen])
+  }, [currentRoundNumber, player.id, room.code, screen])
 
   useEffect(() => {
-    if (!firebaseEnabled || !['round-complete', 'thumb-vote', 'round-result'].includes(screen) || !round) {
+    if (!firebaseEnabled || !['editor', 'round-complete', 'thumb-vote', 'round-result-transition', 'round-result', 'match-result'].includes(screen) || !round) {
       return undefined
     }
 
@@ -328,7 +455,7 @@ function GameApp() {
   }, [room.code, round, screen])
 
   useEffect(() => {
-    if (!firebaseEnabled || !['thumb-vote', 'round-result'].includes(screen) || !round) {
+    if (!firebaseEnabled || !['thumb-vote', 'round-result-transition', 'round-result'].includes(screen) || !round) {
       return undefined
     }
 
@@ -355,7 +482,7 @@ function GameApp() {
   }, [player.id, room.code, round, screen])
 
   useEffect(() => {
-    const totalPlayers = Math.max(1, players.length)
+    const totalPlayers = activePlayerCount
     const canOpenGallery = screen === 'round-complete'
       && room.isHost
       && submission.status === 'submitted'
@@ -387,13 +514,16 @@ function GameApp() {
     }, 1400)
 
     return () => window.clearTimeout(timeout)
-  }, [isOpeningGallery, players.length, room.code, room.isHost, screen, submission.count, submission.status])
+  }, [activePlayerCount, isOpeningGallery, room.code, room.isHost, screen, submission.count, submission.status])
 
   function openIdentity(nextRoom) {
     setRoom(nextRoom)
     setPlayer(loadRoomIdentity(nextRoom.code))
     setPlayers([])
     setRound(null)
+    setCurrentRoundNumber(1)
+    currentRoundNumberRef.current = 1
+    setMatchScores({})
     setRoundResult(null)
     setSubmission({ count: 0, error: '', status: 'idle' })
     setBaseImages([])
@@ -405,6 +535,7 @@ function GameApp() {
     setIsVotingBaseImage(false)
     setIsVoting(false)
     setIsFinishingVoting(false)
+    setIsAdvancingRound(false)
     pendingBaseImageVoteRef.current = null
     pendingRoundVoteRef.current = null
     announcedBaseImageIdsRef.current = null
@@ -462,6 +593,7 @@ function GameApp() {
       setPlayer(nextPlayer)
       setPlayers([nextPlayer])
       setRoom((currentRoom) => ({ ...currentRoom, isHost: nextPlayer.isHost }))
+      resumingActiveRoomRef.current = Boolean(nextPlayer.isReturningActive)
       setScreen('lobby')
     } catch (error) {
       setRoomError(error.message || 'Não foi possível entrar na sala. Tente novamente.')
@@ -493,7 +625,7 @@ function GameApp() {
 
     if (firebaseEnabled) {
       const { submitBaseImage } = await import('./lib/roomService.js')
-      const submittedImage = await submitBaseImage(room.code, imageData)
+      const submittedImage = await submitBaseImage(room.code, currentRoundNumber, imageData)
       setBaseImages((currentImages) => [
         ...currentImages.filter((image) => image.id !== submittedImage.id),
         submittedImage,
@@ -512,7 +644,7 @@ function GameApp() {
         const { startImageVoting } = await import('./lib/roomService.js')
         await startImageVoting(room.code)
       } else {
-        setScreen('image-vote')
+        setScreen('image-vote-transition')
       }
     } catch (error) {
       setRoomError(error.message || 'Não foi possível iniciar a votação.')
@@ -534,7 +666,7 @@ function GameApp() {
     try {
       if (firebaseEnabled) {
         const { voteForBaseImage } = await import('./lib/roomService.js')
-        await voteForBaseImage(room.code, imageId)
+        await voteForBaseImage(room.code, currentRoundNumber, imageId)
       }
     } catch (error) {
       setBaseImageVotes(previousVotes)
@@ -551,11 +683,12 @@ function GameApp() {
     try {
       if (firebaseEnabled) {
         const { finishBaseImageVoting } = await import('./lib/roomService.js')
-        await finishBaseImageVoting(room.code)
+        await finishBaseImageVoting(room.code, currentRoundNumber)
       } else {
         const winner = baseImages.find((image) => image.id === baseImageVotes[0]?.imageId)
           ?? baseImages[0]
         setRound(createRoundSession(room.code, {
+          roundNumber: currentRoundNumber,
           selectedImageData: winner.imageData,
           settings: roomSettings,
         }))
@@ -679,8 +812,13 @@ function GameApp() {
         const winner = [...roundSubmissions].sort((first, second) => (
           totals.get(second.id) - totals.get(first.id) || first.id.localeCompare(second.id)
         ))[0]
-        setRoundOutcome({ winnerId: winner.id, winnerImageData: winner.imageData })
-        setScreen('round-result')
+        const nextScores = { ...matchScores }
+        totals.forEach((points, playerId) => {
+          nextScores[playerId] = (nextScores[playerId] ?? 0) + points
+        })
+        setMatchScores(nextScores)
+        setRoundOutcome({ winnerId: winner.id })
+        setScreen('round-result-transition')
         setIsFinishingVoting(false)
       }
     } catch (error) {
@@ -689,10 +827,60 @@ function GameApp() {
     }
   }
 
+  async function handleContinueAfterRound() {
+    if (isAdvancingRound || !round) return
+
+    setIsAdvancingRound(true)
+    setRoomError('')
+
+    try {
+      const isLastRound = round.number >= round.total
+
+      if (firebaseEnabled) {
+        const { finishMatch, startNextRound } = await import('./lib/roomService.js')
+        if (isLastRound) {
+          await finishMatch(room.code, round.number)
+        } else {
+          await startNextRound(room.code, round.number)
+        }
+        return
+      }
+
+      if (isLastRound) {
+        setScreen('match-result')
+        setIsAdvancingRound(false)
+        return
+      }
+
+      const nextRoundNumber = round.number + 1
+      currentRoundNumberRef.current = nextRoundNumber
+      setCurrentRoundNumber(nextRoundNumber)
+      setRound(null)
+      setRoundResult(null)
+      setSubmission({ count: 0, error: '', status: 'idle' })
+      setBaseImages([])
+      setBaseImageVotes([])
+      setRoundSubmissions([])
+      setRoundVotes([])
+      setRoundOutcome(null)
+      setIsOpeningGallery(false)
+      setIsVotingBaseImage(false)
+      setIsVoting(false)
+      setIsFinishingVoting(false)
+      setIsAdvancingRound(false)
+      setScreen('lobby-transition')
+    } catch (error) {
+      setRoomError(error.message || 'Não foi possível avançar a partida.')
+      setIsAdvancingRound(false)
+    }
+  }
+
   if (screen === 'lobby-transition') {
     return (
       <LobbyTransitionScreen
         roomCode={room.code}
+        roundNumber={currentRoundNumber}
+        totalRounds={roomSettings.rounds}
         onComplete={() => setScreen('image-submit')}
       />
     )
@@ -706,7 +894,9 @@ function GameApp() {
         isHost={room.isHost}
         playerId={player.id}
         roomCode={room.code}
-        totalPlayers={Math.max(1, players.length)}
+        roundNumber={currentRoundNumber}
+        totalRounds={roomSettings.rounds}
+        totalPlayers={activePlayerCount}
         onBeginVoting={handleBeginImageVoting}
         onLeave={() => setScreen('menu')}
         onSubmit={handleBaseImageSubmit}
@@ -723,10 +913,24 @@ function GameApp() {
         isVoting={isVotingBaseImage}
         playerId={player.id}
         roomCode={room.code}
-        totalPlayers={Math.max(1, players.length)}
+        roundNumber={currentRoundNumber}
+        totalRounds={roomSettings.rounds}
+        totalPlayers={activePlayerCount}
         votes={baseImageVotes}
         onFinishVoting={handleFinishBaseImageVoting}
         onVote={handleBaseImageVote}
+      />
+    )
+  }
+
+  if (screen === 'image-vote-transition') {
+    return (
+      <ImageVoteTransitionScreen
+        images={baseImages}
+        roomCode={room.code}
+        roundNumber={currentRoundNumber}
+        totalRounds={roomSettings.rounds}
+        onComplete={() => setScreen('image-vote')}
       />
     )
   }
@@ -760,7 +964,7 @@ function GameApp() {
         roomCode={room.code}
         round={round}
         submission={submission}
-        totalPlayers={Math.max(1, players.length)}
+        totalPlayers={activePlayerCount}
         onLeave={() => setScreen('menu')}
         onRetry={() => uploadRoundResult(roundResult)}
       />
@@ -778,7 +982,7 @@ function GameApp() {
         roomCode={room.code}
         round={round}
         submissions={roundSubmissions}
-        totalPlayers={Math.max(1, players.length)}
+        totalPlayers={activePlayerCount}
         votes={roundVotes}
         onFinishVoting={handleFinishRoundVoting}
         onVote={handleRoundVote}
@@ -789,12 +993,40 @@ function GameApp() {
   if (screen === 'round-result' && round) {
     return (
       <RoundResultScreen
+        connectionError={roomError}
+        isAdvancing={isAdvancingRound}
+        isHost={room.isHost}
+        matchScores={matchScores}
         outcome={roundOutcome}
         players={players.length ? players : [player]}
         roomCode={room.code}
         round={round}
         submissions={roundSubmissions}
         votes={roundVotes}
+        onContinue={handleContinueAfterRound}
+      />
+    )
+  }
+
+  if (screen === 'round-result-transition' && round) {
+    return (
+      <RoundResultTransitionScreen
+        roomCode={room.code}
+        round={round}
+        submissions={roundSubmissions}
+        onComplete={() => setScreen('round-result')}
+      />
+    )
+  }
+
+  if (screen === 'match-result') {
+    return (
+      <MatchResultScreen
+        players={players.length ? players : [player]}
+        roomCode={room.code}
+        scores={matchScores}
+        submissions={roundSubmissions}
+        totalRounds={roomSettings.rounds}
         onLeave={() => setScreen('menu')}
       />
     )
@@ -840,8 +1072,10 @@ function GameApp() {
           baseImageSource={round?.baseImageData}
           onBack={() => setScreen('menu')}
           onFinish={round ? handleRoundFinish : undefined}
+          players={activePlayers.length ? activePlayers : [player]}
           round={round}
           sessionKey={round ? `${room.code}:${round.number}:${player.id}` : undefined}
+          submittedPlayerIds={roundSubmissions.map((submission) => submission.id)}
         />
       </Suspense>
     )

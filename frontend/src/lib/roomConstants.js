@@ -1,2 +1,5 @@
 export const MAX_ROOM_PLAYERS = 8
 
+export const ROOM_PRESENCE_HEARTBEAT_MS = 15_000
+export const ROOM_PRESENCE_TIMEOUT_MS = 75_000
+
